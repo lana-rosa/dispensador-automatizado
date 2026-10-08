@@ -15,11 +15,11 @@ class PruebasEsquema(unittest.TestCase):
     def tearDown(self):
         self.con.close()
 
-    def _pedido(self, estado="EN_COLA", casillero_id=None, producto_id=1):
+    def _pedido(self, estado="EN_COLA", casillero_id=None):
         return self.con.execute(
-            "INSERT INTO pedidos (cliente_nombre, cliente_contacto, producto_id, cantidad,"
-            " peso_teorico_g, estado, casillero_id) VALUES ('Ana', 'ana@mail.co', ?, 1, 25, ?, ?)",
-            (producto_id, estado, casillero_id),
+            "INSERT INTO pedidos (cliente_nombre, cliente_contacto, peso_teorico_g, estado,"
+            " casillero_id) VALUES ('Ana', 'ana@mail.co', 25, ?, ?)",
+            (estado, casillero_id),
         ).lastrowid
 
     def test_datos_demo_cargados(self):
@@ -65,8 +65,16 @@ class PruebasEsquema(unittest.TestCase):
         self.con.execute(sql, (p1, "CADUCADO"))  # los históricos sí pueden repetirse
 
     def test_claves_foraneas_activas(self):
+        pedido = self._pedido()
         with self.assertRaises(sqlite3.IntegrityError):
-            self._pedido(producto_id=999)
+            self.con.execute("INSERT INTO pedido_items VALUES (?, 999, 1, 25)", (pedido,))
+
+    def test_un_pedido_admite_varios_productos_pero_sin_repetir_linea(self):
+        pedido = self._pedido()
+        self.con.execute("INSERT INTO pedido_items VALUES (?, 1, 1, 25)", (pedido,))
+        self.con.execute("INSERT INTO pedido_items VALUES (?, 2, 3, 90)", (pedido,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.con.execute("INSERT INTO pedido_items VALUES (?, 1, 1, 25)", (pedido,))
 
     def test_tipo_de_alerta_invalido(self):
         with self.assertRaises(sqlite3.IntegrityError):

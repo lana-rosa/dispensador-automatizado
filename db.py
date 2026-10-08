@@ -19,11 +19,19 @@ PRODUCTOS_DEMO = [
 CASILLEROS_DEMO = ["A1", "A2", "A3", "A4", "B1", "B2"]
 
 
-def conectar(ruta=RUTA_BD) -> sqlite3.Connection:
-    """Abre una conexión con claves foráneas activas y filas accesibles por nombre."""
-    con = sqlite3.connect(ruta)
+def conectar(ruta=RUTA_BD, multihilo: bool = False) -> sqlite3.Connection:
+    """Abre una conexión con claves foráneas activas y filas accesibles por nombre.
+
+    isolation_level=None: las transacciones las abrimos nosotros (ver servicio.transaccion).
+    multihilo=True: FastAPI puede abrir y usar la conexión en hilos distintos de una
+    misma petición (nunca de forma simultánea).
+    """
+    con = sqlite3.connect(ruta, isolation_level=None, check_same_thread=not multihilo)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")  # SQLite lo trae apagado por defecto
+    con.execute("PRAGMA busy_timeout = 5000")  # espera si otra petición está escribiendo
+    if ruta != ":memory:":
+        con.execute("PRAGMA journal_mode = WAL")  # lecturas no bloquean escrituras
     return con
 
 

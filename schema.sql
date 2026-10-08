@@ -48,14 +48,14 @@ CREATE TABLE casilleros (
 );
 
 -- ---------------------------------------------------------------- pedidos
--- Regla del proyecto: no se mezclan productos distintos en una misma caja.
--- Por eso un pedido = UN producto x cantidad = UN casillero. Si el carrito de la
--- app tiene varios productos, se crea un pedido por producto y se agrupan con
--- carrito_ref.
+-- Un pedido = un carrito de compras = UN casillero. Los productos del carrito
+-- (uno o varios, distintos entre sí) se empacan juntos en la misma caja y se
+-- verifican con un solo peso: la suma de cantidad x peso unitario de sus líneas
+-- (tabla pedido_items).
 --
 -- EN_COLA         aceptado, sin casillero libre todavía
 -- ASIGNADO        casillero reservado, esperando arrancar la banda
--- EN_TRANSPORTE   banda/actuador moviendo el producto
+-- EN_TRANSPORTE   banda/actuador moviendo la caja
 -- VERIFICANDO     en el casillero, validando peso y foto
 -- LISTO_RETIRO    verificado, PIN vigente, esperando al cliente
 -- ENTREGADO       el cliente digitó el PIN y retiró
@@ -67,9 +67,6 @@ CREATE TABLE pedidos (
     id               INTEGER PRIMARY KEY,
     cliente_nombre   TEXT    NOT NULL,
     cliente_contacto TEXT    NOT NULL,
-    carrito_ref      TEXT,
-    producto_id      INTEGER NOT NULL REFERENCES productos (id),
-    cantidad         INTEGER NOT NULL CHECK (cantidad > 0),
     peso_teorico_g   REAL    NOT NULL CHECK (peso_teorico_g > 0),
     estado           TEXT    NOT NULL DEFAULT 'EN_COLA'
                      CHECK (estado IN ('EN_COLA', 'ASIGNADO', 'EN_TRANSPORTE', 'VERIFICANDO',
@@ -91,7 +88,17 @@ CREATE UNIQUE INDEX ux_pedido_activo_por_casillero
       AND estado IN ('ASIGNADO', 'EN_TRANSPORTE', 'VERIFICANDO', 'LISTO_RETIRO', 'ATASCADO');
 
 -- Para sacar rápido el siguiente pedido de la cola (FIFO).
-CREATE INDEX ix_pedidos_cola ON pedidos (estado, creado_en);
+CREATE INDEX ix_pedidos_cola ON pedidos (estado, id);
+
+-- Líneas del carrito. peso_unitario_g es una copia (snapshot) del peso del producto
+-- al momento de pedir: si luego cambia el catálogo, el peso teórico no se altera.
+CREATE TABLE pedido_items (
+    pedido_id       INTEGER NOT NULL REFERENCES pedidos (id),
+    producto_id     INTEGER NOT NULL REFERENCES productos (id),
+    cantidad        INTEGER NOT NULL CHECK (cantidad > 0),
+    peso_unitario_g REAL    NOT NULL CHECK (peso_unitario_g > 0),
+    PRIMARY KEY (pedido_id, producto_id)
+);
 
 -- ---------------------------------------------------------------- PIN
 -- Se guarda el hash, nunca el PIN en claro: el PIN solo viaja al cliente.
@@ -132,6 +139,7 @@ CREATE TABLE alertas (
                  CHECK (tipo IN ('ATASCO', 'ERROR_DESPACHO', 'STOCK_BAJO', 'PIN_BLOQUEADO')),
     pedido_id    INTEGER REFERENCES pedidos (id),
     casillero_id INTEGER REFERENCES casilleros (id),
+    producto_id  INTEGER REFERENCES productos (id),
     mensaje      TEXT    NOT NULL,
     atendida     INTEGER NOT NULL DEFAULT 0 CHECK (atendida IN (0, 1)),
     creado_en    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -151,3 +159,13 @@ CREATE TABLE bitacora (
 );
 
 CREATE INDEX ix_bitacora_pedido ON bitacora (pedido_id, id);
+
+-- ---------------------------------------------------------------- notificaciones
+-- Bandeja de salida SIMULADA hacia el cliente (en producción sería SMS/correo/push
+-- y no se guardaría el PIN en claro: aquí se guarda solo para poder mostrarlo).
+CREATE TABLE notificaciones (
+    id        INTEGER PRIMARY KEY,
+    pedido_id INTEGER NOT NULL REFERENCES pedidos (id),
+    mensaje   TEXT    NOT NULL,
+    creado_en TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
