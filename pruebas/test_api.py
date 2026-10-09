@@ -268,5 +268,24 @@ class PruebasReglas(BaseApi):
         self.assertEqual(self.cli.get(f"/pedidos/{espera['id']}").json()["estado"], "ASIGNADO")
 
 
+class PruebasPantallas(BaseApi):
+    def test_pantallas_cargan(self):
+        for ruta in ("/", "/cliente", "/admin", "/pantallas/comun.js", "/pantallas/estilos.css"):
+            self.assertEqual(self.cli.get(ruta).status_code, 200, ruta)
+
+    def test_lista_de_pedidos_y_casilleros(self):
+        a, b = self.pedir(), self.pedir()
+        self.assertEqual([p["id"] for p in self.cli.get("/admin/pedidos").json()], [b["id"], a["id"]])
+        self.assertEqual(self.cli.get("/casilleros").json(), ["A1", "A2", "A3", "A4", "B1", "B2"])
+
+    def test_reloj_simulado_permite_probar_la_caducidad(self):
+        pedido = self.pedir()
+        self.llevar_y_verificar(pedido["id"], 25.0)
+        r = self.cli.post("/admin/reloj/adelantar", json={"horas": 24})
+        self.assertEqual(r.json()["adelanto_horas"], 24)
+        self.assertEqual(self.cli.post("/admin/caducar-vencidos").json()["pedidos_caducados"],
+                         [pedido["id"]])
+
+
 if __name__ == "__main__":
     unittest.main()

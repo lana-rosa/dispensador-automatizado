@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administrador · Dispensador</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚙️</text></svg>">
+  <link rel="stylesheet" href="/pantallas/estilos.css">
+  <style>
+    .kpis > .tarjeta { margin-top: 0; }
+    .kpis { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
+    @media (min-width: 900px) { .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .kpi .valor { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .kpi .nombre { color: var(--suave); font-size: .85rem; font-weight: 600; }
+    .kpi.alerta .valor { color: var(--rojo); }
+    .barra-ocupacion { height: 8px; background: var(--gris-fondo); border-radius: 99px; overflow: hidden; margin-top: .4rem; }
+    .barra-ocupacion div { height: 100%; background: var(--primario); }
+
+    .casilleros { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+    .casillero .btn { width: 100%; padding-left: .3rem; padding-right: .3rem; }
+    .casillero { border-radius: 12px; padding: 10px; border: 2px solid transparent; display: grid; gap: .3rem; }
+    .casillero .cod { font-weight: 800; font-size: 1.2rem; }
+    .casillero .est { font-size: .78rem; font-weight: 700; text-transform: uppercase; }
+    .casillero .ped { font-size: .85rem; min-height: 1.2em; }
+    .c-LIBRE { background: var(--verde-fondo); color: var(--verde); }
+    .c-RESERVADO { background: var(--azul-fondo); color: var(--primario-osc); }
+    .c-OCUPADO { background: var(--ambar-fondo); color: var(--ambar); }
+    .c-MANTENIMIENTO { background: var(--rojo-fondo); color: var(--rojo); border-color: #fca5a5; }
+    .leyenda { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .7rem; }
+
+    .sim-item { border: 1px solid var(--borde); border-radius: 12px; padding: 10px; display: grid; gap: .45rem; }
+    .sim-item + .sim-item { margin-top: 10px; }
+    .sim-fila { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+    .sim-fila input { width: 110px; }
+    .reloj { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+    .reloj .hora { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    .alerta-item { border-left: 4px solid var(--rojo); background: #fff7f7; border-radius: 8px; padding: .55rem .7rem; display: grid; gap: .3rem; }
+    .alerta-item + .alerta-item { margin-top: 8px; }
+    .alerta-item.STOCK_BAJO { border-color: var(--ambar); background: #fffbeb; }
+    .alerta-item .meta { display: flex; justify-content: space-between; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: .8rem; color: var(--suave); }
+    .alerta-item p { margin: 0; font-size: .92rem; }
+
+    .reab { display: flex; gap: .35rem; justify-content: flex-end; }
+    .reab input { width: 64px; padding: .3rem .4rem; }
+    @media (max-width: 600px) { .col-min { display: none; } .reab input { width: 48px; } }
+    tr.bajo td:first-child { box-shadow: inset 3px 0 var(--ambar); }
+    .bitacora li { margin-bottom: .45rem; font-size: .92rem; }
+    .bitacora .t { color: var(--suave); font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <header class="barra">
+    <h1>📊 Administrador</h1>
+    <nav><a href="/">Inicio</a> · <a href="/cliente">Cliente</a> · <a href="/docs">API</a></nav>
+  </header>
+
+  <main class="contenedor">
+    <section class="kpis" id="kpis"></section>
+
+    <div class="rejilla dos">
+      <div class="columna">
+        <section class="tarjeta" style="order:1">
+          <h2>Casilleros</h2>
+          <div class="casilleros" id="casilleros"></div>
+          <div class="leyenda">
+            <span class="chip verde">Libre</span><span class="chip azul">Reservado (en camino)</span>
+            <span class="chip ambar">Ocupado (esperando retiro)</span><span class="chip rojo">Mantenimiento</span>
+          </div>
+        </section>
+
+        <section class="tarjeta" style="order:4">
+          <h2>Pedidos</h2>
+          <div class="tabla-envoltura">
+            <table>
+              <thead><tr><th>#</th><th>Cliente</th><th>Productos</th><th>Estado</th><th>Casillero</th><th></th></tr></thead>
+              <tbody id="pedidos"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="tarjeta" style="order:5">
+          <h2>Inventario</h2>
+          <div class="tabla-envoltura">
+            <table>
+              <thead><tr><th>Producto</th><th class="num">Disp.</th><th class="num">Reserv.</th><th class="num col-min">Mín.</th><th class="num">Reabastecer</th></tr></thead>
+              <tbody id="inventario"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div class="columna">
+        <section class="tarjeta" style="order:2">
+          <h2>🛠️ Simulador de la máquina</h2>
+          <p class="ayuda">Mientras no exista el hardware, aquí se simula la banda, la báscula y la cámara.</p>
+          <div id="simulador"></div>
+        </section>
+
+        <section class="tarjeta" style="order:3">
+          <h2>🚨 Alertas</h2>
+          <div id="alertas"></div>
+        </section>
+
+        <section class="tarjeta" style="order:6">
+          <h2>⏱️ Reloj simulado</h2>
+          <p class="ayuda">Adelanta el tiempo para probar que un PIN no reclamado caduca a las 24 h.</p>
+          <div class="reloj">
+            <span class="hora" id="hora"></span>
+            <button class="btn chico sec" data-adelantar="1">+1 h</button>
+            <button class="btn chico sec" data-adelantar="24">+24 h</button>
+          </div>
+          <div id="msj-reloj"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="dialogo">
+    <div class="cuerpo"><h2 id="dlg-titulo"></h2><ol class="bitacora" id="dlg-lista"></ol></div>
+    <div class="pie"><button class="btn sec" onclick="this.closest('dialog').close()">Cerrar</button></div>
+  </dialog>
+
+<script src="/pantallas/comun.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const NOMBRE_ALERTA = { ATASCO: "Atasco", ERROR_DESPACHO: "Error de despacho", STOCK_BAJO: "Stock bajo", PIN_BLOQUEADO: "PIN bloqueado" };
+
+// No repintar una sección mientras el usuario escribe en ella.
+function escribiendoEn(id) {
+  const a = document.activeElement;
+  return a && a.tagName === "INPUT" && $(id).contains(a);
+}
+
+async function refrescar() {
+  const [cas, ped, inv, ale, rel] = await Promise.all([
+    api("/admin/casilleros"), api("/admin/pedidos"), api("/admin/inventario"),
+    api("/admin/alertas"), api("/admin/reloj"),
+  ]);
+  pintarKpis(cas.datos, inv.datos, ale.datos);
+  pintarCasilleros(cas.datos);
+  pintarPedidos(ped.datos);
+  if (!escribiendoEn("inventario")) pintarInventario(inv.datos);
+  if (!escribiendoEn("simulador")) pintarSimulador(ped.datos);
+  pintarAlertas(ale.datos);
+  $("hora").textContent = new Date(rel.datos.ahora).toLocaleString("es-CO") +
+    (rel.datos.adelanto_horas ? ` (+${rel.datos.adelanto_horas} h)` : "");
+}
+
+function pintarKpis(cas, inv, ale) {
+  const bajos = inv.filter((p) => p.stock_bajo).length;
+  $("kpis").innerHTML = `
+    <div class="tarjeta kpi"><div class="nombre">Ocupación de casilleros</div>
+      <div class="valor">${cas.ocupacion_pct}%</div>
+      <div class="barra-ocupacion"><div style="width:${cas.ocupacion_pct}%"></div></div></div>
+    <div class="tarjeta kpi"><div class="nombre">Pedidos en cola</div><div class="valor">${cas.pedidos_en_cola}</div></div>
+    <div class="tarjeta kpi ${ale.length ? "alerta" : ""}"><div class="nombre">Alertas pendientes</div><div class="valor">${ale.length}</div></div>
+    <div class="tarjeta kpi ${bajos ? "alerta" : ""}"><div class="nombre">Productos con stock bajo</div><div class="valor">${bajos}</div></div>`;
+}
+
+function pintarCasilleros(cas) {
+  const nombres = { LIBRE: "Libre", RESERVADO: "Reservado", OCUPADO: "Ocupado", MANTENIMIENTO: "Mantenimiento" };
+  $("casilleros").innerHTML = cas.casilleros.map((c) => `
+    <div class="casillero c-${c.estado}">
+      <span class="cod">${esc(c.codigo)}</span>
+      <span class="est">${nombres[c.estado]}</span>
+      <span class="ped">${c.pedido_id ? `Pedido #${c.pedido_id}` : ""}</span>
+      ${c.estado === "LIBRE" ? `<button class="btn chico sec" data-mant="${esc(c.codigo)}">Mantenimiento</button>` : ""}
+      ${c.estado === "MANTENIMIENTO" ? `<button class="btn chico" data-liberar="${esc(c.codigo)}">Liberar</button>` : ""}
+    </div>`).join("");
+}
+
+function pintarPedidos(pedidos) {
+  $("pedidos").innerHTML = pedidos.map((p) => `
+    <tr><td>${p.id}</td><td>${esc(p.cliente_nombre)}</td><td>${resumenItems(p.items)}</td>
+      <td>${chipEstado(p.estado)}${p.posicion_en_cola ? ` <span class="ayuda">#${p.posicion_en_cola}</span>` : ""}</td>
+      <td>${esc(p.casillero || "—")}</td>
+      <td><button class="btn chico sec" data-traza="${p.id}">Historial</button></td></tr>`).join("")
+    || '<tr><td colspan="6" class="vacio">Todavía no hay pedidos.</td></tr>';
+}
+
+function pintarInventario(inv) {
+  $("inventario").innerHTML = inv.map((p) => `
+    <tr class="${p.stock_bajo ? "bajo" : ""}">
+      <td>${esc(p.nombre)}<br><span class="ayuda">${esc(p.sku)} · ${p.peso_unitario_g} g</span>
+        ${p.stock_bajo ? ' <span class="chip ambar">bajo</span>' : ""}</td>
+      <td class="num">${p.stock_disponible}</td><td class="num">${p.stock_reservado}</td><td class="num col-min">${p.stock_minimo}</td>
+      <td class="num"><div class="reab"><input class="entrada" type="number" min="1" value="10" id="reab-${esc(p.sku)}" aria-label="Cantidad">
+        <button class="btn chico" data-reab="${esc(p.sku)}">+</button></div></td>
+    </tr>`).join("");
+}
+
+function pintarSimulador(pedidos) {
+  const activos = pedidos.filter((p) => ["ASIGNADO", "VERIFICANDO"].includes(p.estado)).reverse();
+  $("simulador").innerHTML = activos.map((p) => p.estado === "ASIGNADO" ? `
+    <div class="sim-item">
+      <div class="sim-fila"><b>Pedido #${p.id}</b> → casillero <b>${esc(p.casillero)}</b> ${chipEstado(p.estado)}</div>
+      <button class="btn chico" data-llegada="${p.id}">▶ Encender banda y llevar al casillero</button>
+    </div>` : `
+    <div class="sim-item">
+      <div class="sim-fila"><b>Pedido #${p.id}</b> en casillero <b>${esc(p.casillero)}</b> ${chipEstado(p.estado)}</div>
+      <div class="ayuda" style="margin:0">Peso teórico: <b>${p.peso_teorico_g} g</b>. Cambia el valor para simular un error.</div>
+      <div class="sim-fila">
+        <input class="entrada" type="number" step="0.1" min="0" id="peso-${p.id}" value="${p.peso_teorico_g}" aria-label="Peso medido">
+        <span>g</span>
+        <button class="btn chico" data-pesar="${p.id}">⚖️📷 Pesar y fotografiar</button>
+      </div>
+    </div>`).join("") || '<p class="vacio">No hay pedidos esperando la máquina.</p>';
+}
+
+function pintarAlertas(alertas) {
+  $("alertas").innerHTML = alertas.map((a) => `
+    <div class="alerta-item ${a.tipo}">
+      <div class="meta"><span class="chip ${a.tipo === "STOCK_BAJO" ? "ambar" : "rojo"}">${NOMBRE_ALERTA[a.tipo] || a.tipo}</span>
+        <span>${fecha(a.creado_en)}</span></div>
+      <p>${esc(a.mensaje)}</p>
+      <div class="sim-fila">
+        <button class="btn chico sec" data-atender="${a.id}">Marcar atendida</button>
+        ${a.tipo === "PIN_BLOQUEADO" && a.pedido_id ? `<button class="btn chico" data-reemitir="${a.pedido_id}">Reemitir PIN</button>` : ""}
+      </div>
+    </div>`).join("") || '<p class="vacio">Sin alertas pendientes. ✅</p>';
+}
+
+// ---------------------------------------------------------------- acciones
+async function accion(promesa, destino) {
+  const r = await promesa;
+  if (!r.ok) alert(textoError(r));
+  await refrescar();
+  return r;
+}
+
+document.body.addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const d = b.dataset;
+  if (d.mant) await accion(api(`/admin/casilleros/${d.mant}/mantenimiento`, { method: "POST" }));
+  if (d.liberar) await accion(api(`/admin/casilleros/${d.liberar}/liberar`, { method: "POST" }));
+  if (d.llegada) await accion(api(`/maquina/pedidos/${d.llegada}/llegada`, { method: "POST" }));
+  if (d.atender) await accion(api(`/admin/alertas/${d.atender}/atender`, { method: "POST" }));
+  if (d.reemitir) await accion(api(`/admin/pedidos/${d.reemitir}/reemitir-pin`, { method: "POST" }));
+  if (d.reab) {
+    const cantidad = Number($(`reab-${d.reab}`).value);
+    await accion(api(`/admin/productos/${d.reab}/reabastecer`, { method: "POST", body: { cantidad } }));
+  }
+  if (d.pesar) {
+    const peso = Number($(`peso-${d.pesar}`).value);
+    b.blur();
+    const r = await accion(api(`/maquina/pedidos/${d.pesar}/verificacion`, { method: "POST",
+      body: { peso_medido_g: peso, foto_ruta: `fotos/pedido${d.pesar}_${Date.now()}.jpg` } }));
+    if (r.ok && !r.datos.aprobado) alert(`❌ Peso rechazado: ${peso} g vs ${r.datos.peso_teorico_g} g (±${r.datos.tolerancia_g} g). Se generó una alerta.`);
+  }
+  if (d.adelantar) {
+    await api("/admin/reloj/adelantar", { method: "POST", body: { horas: Number(d.adelantar) } });
+    const r = await api("/admin/caducar-vencidos", { method: "POST" });
+    const n = r.datos.pedidos_caducados.length;
+    $("msj-reloj").innerHTML = n
+      ? `<p class="aviso info">Caducaron ${n} pedido(s): #${r.datos.pedidos_caducados.join(", #")}. Sus casilleros quedaron libres.</p>`
+      : '<p class="aviso ok">Reloj adelantado. Ningún PIN caducó todavía.</p>';
+    await refrescar();
+  }
+  if (d.traza) {
+    const r = await api(`/pedidos/${d.traza}/trazabilidad`);
+    $("dlg-titulo").textContent = `Historial del pedido #${d.traza}`;
+    $("dlg-lista").innerHTML = (r.datos || []).map((ev) =>
+      `<li><b>${esc(ev.tipo)}</b> ${esc(ev.detalle || "")}<br><span class="t">${fecha(ev.creado_en)}</span></li>`).join("");
+    $("dialogo").showModal();
+  }
+});
+
+refrescar();
+setInterval(refrescar, 3000);
+</script>
+</body>
+</html>

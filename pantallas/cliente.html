@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cliente · Dispensador</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚙️</text></svg>">
+  <link rel="stylesheet" href="/pantallas/estilos.css">
+  <style>
+    .productos { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+    .producto { border: 1px solid var(--borde); border-radius: 12px; padding: 12px; display: grid; gap: .4rem; }
+    .producto h3 { font-size: 1rem; margin: 0; }
+    .producto .datos { font-size: .85rem; color: var(--suave); }
+    .cantidad { display: flex; align-items: center; gap: .5rem; }
+    .cantidad button { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--borde); background: #fff; font-size: 1.1rem; }
+    .cantidad button:disabled { opacity: .4; cursor: not-allowed; }
+    .cantidad span { min-width: 1.6rem; text-align: center; font-weight: 700; }
+    .linea-carrito { display: flex; justify-content: space-between; gap: .5rem; padding: .35rem 0; border-bottom: 1px dashed var(--borde); font-size: .95rem; }
+    .total { display: flex; justify-content: space-between; font-weight: 700; margin: .6rem 0 1rem; }
+
+    .pedido { border: 1px solid var(--borde); border-radius: 12px; padding: 12px; }
+    .pedido + .pedido { margin-top: 10px; }
+    .pedido .cab { display: flex; justify-content: space-between; align-items: center; gap: .5rem; flex-wrap: wrap; }
+    .pedido .detalle { font-size: .88rem; color: var(--suave); margin: .3rem 0; }
+    .pin-caja { background: var(--verde-fondo); border-radius: 10px; padding: .6rem .8rem; margin: .5rem 0; }
+    .pin-caja .pin { font: 700 1.6rem/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .25em; color: var(--verde); }
+    .acciones { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .4rem; }
+
+    .teclado-pantalla {
+      background: #0f172a; color: #a7f3d0; border-radius: 10px; padding: .7rem; text-align: center;
+      font: 700 1.8rem/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .3em; min-height: 3.2rem;
+    }
+    .teclas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+    .teclas button { padding: .8rem 0; border-radius: 10px; border: 1px solid var(--borde); background: #fff; font-size: 1.2rem; font-weight: 700; }
+    .teclas button:hover { background: var(--gris-fondo); }
+    .cerradura { text-align: center; font-size: 3rem; line-height: 1; margin-top: .6rem; }
+  </style>
+</head>
+<body>
+  <header class="barra">
+    <h1>🛒 Cliente</h1>
+    <nav><a href="/">Inicio</a> · <a href="/admin">Administrador</a></nav>
+  </header>
+
+  <main class="contenedor rejilla dos">
+    <div class="columna">
+      <section class="tarjeta" style="order:1">
+        <h2>1. Elige tus productos</h2>
+        <p class="ayuda">Todo tu carrito se empaca en una sola caja y va a un solo casillero.</p>
+        <div id="productos" class="productos"><p class="vacio">Cargando…</p></div>
+      </section>
+
+      <section class="tarjeta" style="order:3">
+        <h2>3. Mis pedidos</h2>
+        <p class="ayuda">Se actualiza solo. Cuando tu pedido esté listo, aquí verás tu PIN.</p>
+        <div id="mis-pedidos"><p class="vacio">Aún no has hecho pedidos desde este navegador.</p></div>
+      </section>
+    </div>
+
+    <div class="columna">
+      <section class="tarjeta" style="order:2">
+        <h2>2. Tu carrito</h2>
+        <div id="carrito"><p class="vacio">El carrito está vacío.</p></div>
+        <form id="form-pedido">
+          <div class="campo"><label for="nombre">Nombre</label><input id="nombre" required autocomplete="name"></div>
+          <div class="campo"><label for="contacto">Correo o celular</label><input id="contacto" required minlength="3"></div>
+          <button class="btn ancho" id="btn-pedir" disabled>Hacer pedido</button>
+        </form>
+        <div id="msj-pedido"></div>
+      </section>
+
+      <section class="tarjeta" style="order:4">
+        <h2>4. Retirar en el casillero</h2>
+        <p class="ayuda">Así se vería el teclado del casillero. Elige el casillero y digita tu PIN.</p>
+        <div class="campo"><label for="casillero">Casillero</label><select id="casillero"></select></div>
+        <div class="teclado-pantalla" id="pantalla-pin">&nbsp;</div>
+        <div class="teclas" id="teclas"></div>
+        <button class="btn ancho" id="btn-abrir">🔑 Abrir casillero</button>
+        <div class="cerradura" id="cerradura">🔒</div>
+        <div id="msj-abrir"></div>
+      </section>
+    </div>
+  </main>
+
+<script src="/pantallas/comun.js"></script>
+<script>
+const carrito = {};          // sku -> cantidad
+let productos = [];
+let pinDigitado = "";
+const CLAVE = "dispensador.misPedidos";
+
+function misPedidos() {
+  try { return JSON.parse(localStorage.getItem(CLAVE)) || []; } catch (_) { return []; }
+}
+function guardarMisPedidos(ids) {
+  try { localStorage.setItem(CLAVE, JSON.stringify(ids)); } catch (_) {}
+}
+
+// ---------------------------------------------------------------- productos y carrito
+async function cargarProductos() {
+  const r = await api("/productos");
+  productos = r.datos || [];
+  pintarProductos();
+}
+
+function pintarProductos() {
+  const caja = document.getElementById("productos");
+  caja.innerHTML = productos.map((p) => {
+    const en = carrito[p.sku] || 0;
+    const agotado = p.stock_disponible === 0;
+    return `<div class="producto">
+      <span class="chip">${esc(p.categoria.replace("_", " ").toLowerCase())}</span>
+      <h3>${esc(p.nombre)}</h3>
+      <div class="datos">${p.peso_unitario_g} g · ${agotado
+        ? '<span class="chip rojo">Agotado</span>' : `${p.stock_disponible} disponibles`}</div>
+      <div class="cantidad">
+        <button data-sku="${esc(p.sku)}" data-d="-1" ${en === 0 ? "disabled" : ""} aria-label="Quitar">−</button>
+        <span>${en}</span>
+        <button data-sku="${esc(p.sku)}" data-d="1" ${en >= p.stock_disponible ? "disabled" : ""} aria-label="Agregar">+</button>
+      </div>
+    </div>`;
+  }).join("") || '<p class="vacio">No hay productos.</p>';
+  pintarCarrito();
+}
+
+document.getElementById("productos").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-sku]");
+  if (!b) return;
+  const sku = b.dataset.sku;
+  carrito[sku] = Math.max(0, (carrito[sku] || 0) + Number(b.dataset.d));
+  if (!carrito[sku]) delete carrito[sku];
+  pintarProductos();
+});
+
+function pintarCarrito() {
+  const lineas = Object.entries(carrito).map(([sku, c]) => ({ p: productos.find((x) => x.sku === sku), c }))
+    .filter((l) => l.p);
+  const caja = document.getElementById("carrito");
+  document.getElementById("btn-pedir").disabled = lineas.length === 0;
+  if (!lineas.length) { caja.innerHTML = '<p class="vacio">El carrito está vacío.</p>'; return; }
+  const peso = lineas.reduce((s, l) => s + l.c * l.p.peso_unitario_g, 0);
+  caja.innerHTML = lineas.map((l) =>
+    `<div class="linea-carrito"><span>${l.c} × ${esc(l.p.nombre)}</span><span>${l.c * l.p.peso_unitario_g} g</span></div>`
+  ).join("") + `<div class="total"><span>Peso de la caja</span><span>${peso} g</span></div>`;
+}
+
+document.getElementById("form-pedido").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msj = document.getElementById("msj-pedido");
+  const btn = document.getElementById("btn-pedir");
+  btn.disabled = true;
+  const r = await api("/pedidos", { method: "POST", body: {
+    cliente_nombre: document.getElementById("nombre").value.trim(),
+    cliente_contacto: document.getElementById("contacto").value.trim(),
+    items: Object.entries(carrito).map(([sku, cantidad]) => ({ sku, cantidad })),
+  }});
+  if (r.ok) {
+    const p = r.datos;
+    guardarMisPedidos([p.id, ...misPedidos()]);
+    Object.keys(carrito).forEach((k) => delete carrito[k]);
+    msj.innerHTML = p.estado === "EN_COLA"
+      ? `<p class="aviso info">Pedido #${p.id} aceptado. Todos los casilleros están ocupados: quedó en cola (posición ${p.posicion_en_cola}).</p>`
+      : `<p class="aviso ok">¡Pedido #${p.id} creado! Casillero reservado: <b>${esc(p.casillero)}</b>.</p>`;
+    await cargarProductos();
+    await cargarMisPedidos();
+  } else {
+    msj.innerHTML = `<p class="aviso error">${esc(textoError(r))}</p>`;
+    btn.disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------- mis pedidos
+async function cargarMisPedidos() {
+  const ids = misPedidos();
+  const caja = document.getElementById("mis-pedidos");
+  if (!ids.length) { caja.innerHTML = '<p class="vacio">Aún no has hecho pedidos desde este navegador.</p>'; return; }
+  const vigentes = [];
+  const tarjetas = [];
+  for (const id of ids) {
+    const r = await api(`/pedidos/${id}`);
+    if (!r.ok) continue;  // la base se reinició: se olvida el pedido
+    vigentes.push(id);
+    const p = r.datos;
+    const notis = (await api(`/pedidos/${id}/notificaciones`)).datos || [];
+    tarjetas.push(tarjetaPedido(p, notis));
+  }
+  if (vigentes.length !== ids.length) guardarMisPedidos(vigentes);
+  caja.innerHTML = tarjetas.join("") || '<p class="vacio">Aún no has hecho pedidos desde este navegador.</p>';
+}
+
+function tarjetaPedido(p, notis) {
+  const [, , explicacion] = ESTADOS[p.estado] || ["", "", ""];
+  let pin = null;
+  for (const n of [...notis].reverse()) {
+    const m = n.mensaje.match(/PIN: (\d+)/);
+    if (m) { pin = m[1]; break; }
+  }
+  const ultimo = notis.length ? notis[notis.length - 1].mensaje : "";
+  const extra = p.estado === "EN_COLA" ? ` · posición ${p.posicion_en_cola} en la cola` : "";
+  return `<div class="pedido">
+    <div class="cab"><b>Pedido #${p.id}</b>${chipEstado(p.estado)}</div>
+    <div class="detalle">${resumenItems(p.items)}</div>
+    <div class="detalle">${esc(explicacion)}${extra}${p.casillero ? ` · Casillero <b>${esc(p.casillero)}</b>` : ""}</div>
+    ${p.estado === "LISTO_RETIRO" && pin ? `<div class="pin-caja">
+        <div class="detalle" style="margin:0">Tu PIN (vence ${fecha(p.pin_expira_en)})</div>
+        <div class="pin">${esc(pin)}</div></div>` : ""}
+    ${ultimo && p.estado !== "LISTO_RETIRO" && !/PIN: /.test(ultimo) ? `<div class="detalle">📩 ${esc(ultimo)}</div>` : ""}
+    <div class="acciones">
+      ${p.estado === "LISTO_RETIRO" && pin ? `<button class="btn chico" data-usar="${esc(p.casillero)}" data-pin="${esc(pin)}">Ir a retirar</button>` : ""}
+      ${["EN_COLA", "ASIGNADO"].includes(p.estado) ? `<button class="btn chico peligro" data-cancelar="${p.id}">Cancelar pedido</button>` : ""}
+    </div>
+  </div>`;
+}
+
+document.getElementById("mis-pedidos").addEventListener("click", async (e) => {
+  const usar = e.target.closest("[data-usar]");
+  const cancelar = e.target.closest("[data-cancelar]");
+  if (usar) {
+    document.getElementById("casillero").value = usar.dataset.usar;
+    pinDigitado = "";  // el cliente debe digitarlo, como en el casillero real
+    pintarPin();
+    document.getElementById("msj-abrir").innerHTML =
+      `<p class="aviso info">Digita tu PIN <b>${esc(usar.dataset.pin)}</b> en el teclado.</p>`;
+    document.getElementById("teclas").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  if (cancelar && confirm(`¿Cancelar el pedido #${cancelar.dataset.cancelar}?`)) {
+    const r = await api(`/pedidos/${cancelar.dataset.cancelar}/cancelar`, { method: "POST" });
+    if (!r.ok) alert(textoError(r));
+    await cargarProductos();
+    await cargarMisPedidos();
+  }
+});
+
+// ---------------------------------------------------------------- teclado del casillero
+async function cargarCasilleros() {
+  const r = await api("/casilleros");
+  document.getElementById("casillero").innerHTML =
+    (r.datos || []).map((c) => `<option>${esc(c)}</option>`).join("");
+}
+
+function pintarPin() {
+  document.getElementById("pantalla-pin").textContent = pinDigitado ? "•".repeat(pinDigitado.length) : " ";
+}
+
+document.getElementById("teclas").innerHTML =
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "C"]
+    .map((t) => `<button type="button" data-t="${t}">${t}</button>`).join("");
+
+document.getElementById("teclas").addEventListener("click", (e) => {
+  const t = e.target.closest("button")?.dataset.t;
+  if (!t) return;
+  if (t === "⌫") pinDigitado = pinDigitado.slice(0, -1);
+  else if (t === "C") pinDigitado = "";
+  else if (pinDigitado.length < 8) pinDigitado += t;
+  pintarPin();
+});
+
+const MOTIVOS = {
+  PIN_INCORRECTO: "PIN incorrecto.",
+  PIN_BLOQUEADO: "PIN bloqueado por demasiados intentos. Se avisó al administrador.",
+  PIN_CADUCADO: "Este PIN ya caducó (pasaron más de 24 h).",
+  SIN_PIN_VIGENTE: "Este casillero no tiene ningún pedido esperando retiro.",
+};
+
+document.getElementById("btn-abrir").addEventListener("click", async () => {
+  const msj = document.getElementById("msj-abrir");
+  const cerradura = document.getElementById("cerradura");
+  const codigo = document.getElementById("casillero").value;
+  if (!pinDigitado) { msj.innerHTML = '<p class="aviso error">Digita el PIN primero.</p>'; return; }
+  const r = await api(`/casilleros/${encodeURIComponent(codigo)}/abrir`, { method: "POST", body: { pin: pinDigitado } });
+  pinDigitado = "";
+  pintarPin();
+  if (r.ok && r.datos.abierto) {
+    cerradura.textContent = "🔓";
+    msj.innerHTML = `<p class="aviso ok">¡Casillero ${esc(codigo)} abierto! Retira tu pedido.</p>`;
+  } else {
+    cerradura.textContent = "🔒";
+    const d = r.datos || {};
+    const quedan = d.intentos_restantes ? ` Te quedan ${d.intentos_restantes} intento(s).` : "";
+    msj.innerHTML = `<p class="aviso error">No abrió: ${esc(MOTIVOS[d.motivo] || textoError(r))}${quedan}</p>`;
+  }
+  setTimeout(() => { cerradura.textContent = "🔒"; }, 6000);
+  await cargarMisPedidos();
+});
+
+// ---------------------------------------------------------------- arranque
+cargarProductos();
+cargarCasilleros();
+cargarMisPedidos();
+setInterval(() => { cargarMisPedidos(); }, 4000);
+setInterval(() => { if (!Object.keys(carrito).length) cargarProductos(); }, 10000);
+</script>
+</body>
+</html>

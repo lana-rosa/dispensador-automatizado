@@ -1,0 +1,113 @@
+:root {
+  --fondo: #f4f6fa;
+  --tarjeta: #ffffff;
+  --texto: #1c2433;
+  --suave: #5d6b82;
+  --borde: #dfe4ee;
+  --primario: #2563eb;
+  --primario-osc: #1d4ed8;
+  --verde: #15803d;
+  --verde-fondo: #dcfce7;
+  --rojo: #b91c1c;
+  --rojo-fondo: #fee2e2;
+  --ambar: #a16207;
+  --ambar-fondo: #fef3c7;
+  --azul-fondo: #dbeafe;
+  --gris-fondo: #eef1f6;
+  --lila-fondo: #ede9fe;
+  --lila: #6d28d9;
+  --radio: 14px;
+  --sombra: 0 1px 2px rgba(16, 24, 40, .06), 0 2px 8px rgba(16, 24, 40, .05);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--fondo); color: var(--texto);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+h1, h2, h3 { margin: 0 0 .5rem; line-height: 1.2; }
+h2 { font-size: 1.15rem; }
+a { color: var(--primario); }
+button { font: inherit; cursor: pointer; }
+input, select { font: inherit; }
+
+.barra {
+  background: #0f172a; color: #fff; padding: .8rem 16px;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+}
+.barra h1 { font-size: 1.1rem; margin: 0; }
+.barra a { color: #cbd5e1; text-decoration: none; font-size: .9rem; }
+.barra a:hover { color: #fff; }
+
+.contenedor { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.rejilla { display: grid; gap: 16px; }
+@media (min-width: 900px) {
+  .rejilla.dos { grid-template-columns: 1.4fr 1fr; align-items: start; }
+}
+
+.tarjeta {
+  background: var(--tarjeta); border: 1px solid var(--borde); border-radius: var(--radio);
+  padding: 16px; box-shadow: var(--sombra); min-width: 0;
+}
+.tarjeta + .tarjeta { margin-top: 16px; }
+.rejilla > .tarjeta + .tarjeta, .columna > .tarjeta + .tarjeta { margin-top: 0; }
+.columna { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.ayuda { color: var(--suave); font-size: .9rem; margin: 0 0 .8rem; }
+
+.btn {
+  border: 0; border-radius: 10px; padding: .6rem 1rem; background: var(--primario); color: #fff;
+  font-weight: 600;
+}
+.btn:hover { background: var(--primario-osc); }
+.btn:disabled { background: #94a3b8; cursor: not-allowed; }
+.btn.sec { background: var(--gris-fondo); color: var(--texto); }
+.btn.sec:hover { background: #e2e7ef; }
+.btn.peligro { background: var(--rojo-fondo); color: var(--rojo); }
+.btn.peligro:hover { background: #fecaca; }
+.btn.chico { padding: .35rem .7rem; font-size: .85rem; }
+.btn.ancho { width: 100%; }
+
+.campo { display: grid; gap: .25rem; margin-bottom: .7rem; }
+.campo label { font-size: .85rem; color: var(--suave); font-weight: 600; }
+.campo input, .campo select, input.entrada {
+  border: 1px solid var(--borde); border-radius: 10px; padding: .55rem .7rem; background: #fff;
+  width: 100%; min-width: 0;
+}
+
+.chip {
+  display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .78rem;
+  font-weight: 700; white-space: nowrap; background: var(--gris-fondo); color: var(--suave);
+}
+.chip.verde { background: var(--verde-fondo); color: var(--verde); }
+.chip.rojo { background: var(--rojo-fondo); color: var(--rojo); }
+.chip.ambar { background: var(--ambar-fondo); color: var(--ambar); }
+.chip.azul { background: var(--azul-fondo); color: var(--primario-osc); }
+.chip.lila { background: var(--lila-fondo); color: var(--lila); }
+
+.aviso { border-radius: 10px; padding: .7rem .9rem; margin: .6rem 0 0; font-size: .95rem; }
+.aviso.ok { background: var(--verde-fondo); color: var(--verde); }
+.aviso.error { background: var(--rojo-fondo); color: var(--rojo); }
+.aviso.info { background: var(--azul-fondo); color: var(--primario-osc); }
+.oculto { display: none !important; }
+
+.tabla-envoltura { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+th, td { text-align: left; padding: .5rem .45rem; border-bottom: 1px solid var(--borde); vertical-align: middle; }
+th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--suave); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.vacio { color: var(--suave); text-align: center; padding: 1rem; font-size: .95rem; }
+
+dialog {
+  border: 0; border-radius: var(--radio); padding: 0; width: min(640px, calc(100vw - 32px));
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .25);
+}
+dialog::backdrop { background: rgba(15, 23, 42, .45); }
+dialog .cuerpo { padding: 16px; max-height: 70vh; overflow-y: auto; }
+dialog .pie { padding: 12px 16px; border-top: 1px solid var(--borde); text-align: right; }
+
+/* En celular las dos columnas se funden y cada sección toma su lugar con "order". */
+@media (max-width: 899px) {
+  .rejilla.dos > .columna { display: contents; }
+}

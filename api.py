@@ -5,10 +5,12 @@ Perfiles (sin autenticación en este MVP; se separan por ruta y por etiqueta en 
   * Máquina        -> /maquina/...  (lo que enviarían la celda de carga y la cámara simuladas)
   * Administrador  -> /admin/...
 """
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import db
@@ -39,6 +41,13 @@ class ReabastecerIn(BaseModel):
     cantidad: int = Field(gt=0, examples=[10])
 
 
+class AdelantarIn(BaseModel):
+    horas: float = Field(gt=0, le=24 * 30, examples=[24])
+
+
+CARPETA_PANTALLAS = Path(__file__).resolve().parent / "pantallas"
+
+
 def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     """`reloj` es una función sin argumentos que devuelve la hora UTC; las pruebas pasan
     uno falso para simular que transcurren 24 horas."""
@@ -50,6 +59,8 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     app = FastAPI(title="Dispensador automatizado - MVP", version="0.2")
     app.state.ruta_bd = ruta_bd
     app.state.reloj = reloj or servicio.ahora_utc
+    app.state.desfase = timedelta(0)  # reloj simulado: el admin puede "adelantar" el tiempo
+    app.mount("/pantallas", StaticFiles(directory=CARPETA_PANTALLAS), name="pantallas")
 
     def conexion(request: Request):
         con = db.conectar(request.app.state.ruta_bd, multihilo=True)
@@ -59,11 +70,24 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
             con.close()
 
     def ahora(request: Request):
-        return request.app.state.reloj()
+        return request.app.state.reloj() + request.app.state.desfase
 
     @app.exception_handler(servicio.ErrorNegocio)
     async def _error_negocio(_, exc: servicio.ErrorNegocio):
         return JSONResponse({"error": exc.codigo, "detalle": exc.mensaje}, exc.status)
+
+    # ------------------------------------------------------------ pantallas
+    @app.get("/", include_in_schema=False)
+    def inicio():
+        return FileResponse(CARPETA_PANTALLAS / "index.html")
+
+    @app.get("/cliente", include_in_schema=False)
+    def pantalla_cliente():
+        return FileResponse(CARPETA_PANTALLAS / "cliente.html")
+
+    @app.get("/admin", include_in_schema=False)
+    def pantalla_admin():
+        return FileResponse(CARPETA_PANTALLAS / "admin.html")
 
     # ------------------------------------------------------------ cliente
     @app.get("/productos", tags=["Cliente"], summary="Disponibilidad de productos")
@@ -96,6 +120,10 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     def cancelar(pedido_id: int, con=Depends(conexion), ahora=Depends(ahora)):
         return servicio.cancelar_pedido(con, pedido_id, ahora)
 
+    @app.get("/casilleros", tags=["Cliente"], summary="Códigos de los casilleros")
+    def casilleros(con=Depends(conexion)):
+        return servicio.listar_codigos_casilleros(con)
+
     @app.post("/casilleros/{codigo}/abrir", tags=["Cliente"],
               summary="Digitar el PIN en el casillero")
     def abrir(codigo: str, datos: AbrirIn, con=Depends(conexion), ahora=Depends(ahora)):
@@ -119,6 +147,21 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     @app.get("/admin/inventario", tags=["Administrador"], summary="Inventario en tiempo real")
     def admin_inventario(con=Depends(conexion)):
         return servicio.inventario(con)
+
+    @app.get("/admin/pedidos", tags=["Administrador"], summary="Pedidos recientes")
+    def admin_pedidos(con=Depends(conexion)):
+        return servicio.listar_pedidos(con)
+
+    @app.get("/admin/reloj", tags=["Administrador"], summary="Hora del sistema (simulada)")
+    def ver_reloj(request: Request, ahora=Depends(ahora)):
+        return {"ahora": servicio.fmt(ahora),
+                "adelanto_horas": request.app.state.desfase.total_seconds() / 3600}
+
+    @app.post("/admin/reloj/adelantar", tags=["Administrador"],
+              summary="[Simulación] Adelantar el reloj para probar la caducidad")
+    def adelantar_reloj(datos: AdelantarIn, request: Request):
+        request.app.state.desfase += timedelta(hours=datos.horas)
+        return ver_reloj(request, ahora(request))
 
     @app.post("/admin/productos/{sku}/reabastecer", tags=["Administrador"],
               summary="Sumar unidades al inventario")

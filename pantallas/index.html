@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dispensador automatizado</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚙️</text></svg>">
+  <link rel="stylesheet" href="/pantallas/estilos.css">
+  <style>
+    .portada { max-width: 760px; margin: 0 auto; padding: 32px 16px; }
+    .portada > p { color: var(--suave); }
+    .opciones { display: grid; gap: 16px; margin-top: 24px; }
+    @media (min-width: 640px) { .opciones { grid-template-columns: 1fr 1fr; } }
+    .opcion { display: block; text-decoration: none; color: inherit; transition: transform .15s; }
+    .opcion:hover { transform: translateY(-2px); border-color: var(--primario); }
+    .opcion .icono { font-size: 2.2rem; }
+    .opcion p { color: var(--suave); margin: .3rem 0 0; }
+    .extra { margin-top: 24px; font-size: .9rem; color: var(--suave); }
+  </style>
+</head>
+<body>
+  <header class="barra"><h1>⚙️ Dispensador automatizado</h1></header>
+  <main class="portada">
+    <h2 style="font-size:1.6rem">¿Quién eres?</h2>
+    <p>Almacén automatizado de componentes electrónicos, herramientas e insumos de laboratorio.
+       Haz tu pedido, la banda lo lleva a un casillero y lo retiras con tu PIN.</p>
+    <div class="opciones">
+      <a class="tarjeta opcion" href="/cliente">
+        <div class="icono">🛒</div>
+        <h2>Soy cliente</h2>
+        <p>Ver productos, armar el carrito, seguir mi pedido y abrir el casillero con mi PIN.</p>
+      </a>
+      <a class="tarjeta opcion" href="/admin">
+        <div class="icono">📊</div>
+        <h2>Soy administrador</h2>
+        <p>Inventario, casilleros, alertas, pedidos y el simulador de la máquina.</p>
+      </a>
+    </div>
+    <p class="extra">Para desarrolladores: <a href="/docs">documentación de la API (/docs)</a>.</p>
+  </main>
+</body>
+</html>

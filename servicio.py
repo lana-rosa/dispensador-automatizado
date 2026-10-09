@@ -555,5 +555,16 @@ def reemitir_pin(con, pedido_id, ahora=None):
                              (pedido["casillero_id"],)).fetchone()[0]
         _bitacora(con, ahora, "PIN_REEMITIDO", None, pedido_id, pedido["casillero_id"])
         _notificar(con, ahora, pedido_id,
-                   f"Nuevo PIN para el casillero {codigo}: {pin}. Vigente hasta {expira} (UTC).")
+                   f"Se emitió un nuevo PIN para el casillero {codigo}. PIN: {pin}. "
+                   f"Vigente hasta {expira} (UTC).")
     return obtener_pedido(con, pedido_id)
+
+
+def listar_pedidos(con, limite=100):
+    """Pedidos más recientes primero (vista del administrador)."""
+    ids = [f[0] for f in con.execute("SELECT id FROM pedidos ORDER BY id DESC LIMIT ?", (limite,))]
+    return [obtener_pedido(con, i) for i in ids]
+
+
+def listar_codigos_casilleros(con):
+    return [f[0] for f in con.execute("SELECT codigo FROM casilleros ORDER BY id")]
