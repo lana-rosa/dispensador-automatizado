@@ -1,14 +1,14 @@
 # Dispensador automatizado — MVP (Python)
 
 Máquina dispensadora simulada con casilleros inteligentes, PIN, validación de peso y foto.
-Todo el hardware es simulado. Carpeta independiente del sitio web.
+Todo el hardware es simulado.
 
 ## Cómo verlo funcionar
 
 Requiere Python 3.10+.
 
 ```bash
-cd dispensador
+cd dispensador-automatizado   # o la carpeta donde descomprimió el proyecto
 pip install -r requirements.txt
 
 # A) Recorrido narrado en consola (P1, P2, P3, P5, P6) — lo más rápido para ver el flujo
