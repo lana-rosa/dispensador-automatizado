@@ -35,11 +35,7 @@ class VerificacionIn(BaseModel):
 
 
 class AbrirIn(BaseModel):
-    pin: str = Field(
-        pattern=r"^\d{6}$",
-        examples=["123456"],
-        description="PIN de exactamente 6 dígitos"
-    )
+     pin: str = Field(pattern=r"^\d{1,12}$", examples=["123456"])
 
 class ReabastecerIn(BaseModel):
     cantidad: int = Field(gt=0, examples=[10])
