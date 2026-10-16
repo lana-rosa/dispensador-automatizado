@@ -199,7 +199,7 @@ def _despachar_cola(con, ahora):
 
 
 # ------------------------------------------------------------------ pedidos
-def crear_pedido(con, cliente_nombre, cliente_contacto, items, ahora=None):
+def crear_pedido(con, cliente_nombre, cliente_contacto, items, ahora=None, usuario_id=None):
     """items: lista de (sku, cantidad). Acepta el pedido si hay stock de TODO el carrito;
     lo asigna a un casillero libre o, si no hay, lo deja en cola."""
     ahora = ahora or ahora_utc()
@@ -225,9 +225,9 @@ def crear_pedido(con, cliente_nombre, cliente_contacto, items, ahora=None):
 
         peso_teorico = sum(p["peso_unitario_g"] * c for p, c in lineas)
         pedido_id = con.execute(
-            "INSERT INTO pedidos (cliente_nombre, cliente_contacto, peso_teorico_g,"
-            " creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?)",
-            (cliente_nombre, cliente_contacto, peso_teorico, fmt(ahora), fmt(ahora)),
+            "INSERT INTO pedidos (usuario_id, cliente_nombre, cliente_contacto, peso_teorico_g,"
+            " creado_en, actualizado_en) VALUES (?, ?, ?, ?, ?, ?)",
+            (usuario_id, cliente_nombre, cliente_contacto, peso_teorico, fmt(ahora), fmt(ahora)),
         ).lastrowid
         for prod, cantidad in lineas:
             con.execute(
@@ -657,3 +657,14 @@ def listar_pedidos(con, limite=100):
 
 def listar_codigos_casilleros(con):
     return [f[0] for f in con.execute("SELECT codigo FROM casilleros ORDER BY id")]
+
+
+def listar_pedidos_de_usuario(con, usuario_id, limite=50):
+    """Pedidos de una cuenta de cliente, más recientes primero."""
+    ids = [f[0] for f in con.execute(
+        "SELECT id FROM pedidos WHERE usuario_id = ? ORDER BY id DESC LIMIT ?", (usuario_id, limite))]
+    return [obtener_pedido(con, i) for i in ids]
+
+
+def dueno_de_pedido(con, pedido_id):
+    return _pedido_fila(con, pedido_id)["usuario_id"]

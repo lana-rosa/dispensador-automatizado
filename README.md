@@ -20,6 +20,13 @@ python3 -m uvicorn api:app --reload
 # abre http://127.0.0.1:8000
 ```
 
+**Cuentas (Issue 1).** El cliente crea su cuenta en la propia pantalla (correo, usuario y contraseña).
+Los administradores se crean en la terminal, con el programa apagado o en otra ventana:
+
+```bash
+python3 crear_admin.py      # en Windows: py crear_admin.py
+```
+
 | Dirección | Pantalla |
 |---|---|
 | http://127.0.0.1:8000/cliente | Cliente: catálogo, carrito, mis pedidos (con PIN) y teclado del casillero |
@@ -59,6 +66,8 @@ python3 -m unittest discover -s pruebas -v
 | `schema.sql` | Tablas, restricciones e índices (SQLite) |
 | `db.py` | Conexión y datos de demostración |
 | `servicio.py` | Todas las reglas de negocio |
+| `cuentas.py` | Cuentas, contraseñas (PBKDF2) y sesiones |
+| `crear_admin.py` | Crea cuentas de administrador desde la terminal |
 | `maquina.py` | Máquinas de estados de la banda (sensores, motor, actuador) y de las electrocerraduras |
 | `api.py` | Endpoints REST (FastAPI) y rutas de las pantallas |
 | `pantallas/` | Pantallas de cliente y administrador (HTML/CSS/JS, sin internet) |

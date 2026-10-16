@@ -10,10 +10,31 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import api
+import cuentas
+import db
 
 reloj = {"t": datetime(2026, 10, 8, 12, 0, 0, tzinfo=timezone.utc)}
 carpeta = tempfile.TemporaryDirectory()
-cli = TestClient(api.crear_app(Path(carpeta.name) / "demo.db", reloj=lambda: reloj["t"]))
+RUTA = Path(carpeta.name) / "demo.db"
+cli = TestClient(api.crear_app(RUTA, reloj=lambda: reloj["t"]))
+
+# Issue 1: cuentas de demostración. El cliente se registra; el administrador se crea por consola.
+_con = db.conectar(RUTA)
+cuentas.crear_usuario(_con, "admin@demo.co", "admin", "clave-admin-demo", "ADMIN")
+_con.execute("UPDATE configuracion SET valor = '100' WHERE clave = 'horas_sesion'")  # la demo adelanta 24 h
+_con.close()
+TOKEN_CLIENTE = cli.post("/cuentas/registro", json={
+    "correo": "ana@correo.co", "usuario": "ana", "contrasena": "clave-ana-demo"}).json()["token"]
+TOKEN_ADMIN = cli.post("/cuentas/login", json={"usuario": "admin", "contrasena": "clave-admin-demo"}).json()["token"]
+
+
+def _token(request):
+    if "authorization" not in request.headers:
+        es_admin = request.url.path.startswith(("/admin/", "/maquina/"))
+        request.headers["Authorization"] = "Bearer " + (TOKEN_ADMIN if es_admin else TOKEN_CLIENTE)
+
+
+cli.event_hooks["request"].append(_token)
 
 
 def titulo(texto):

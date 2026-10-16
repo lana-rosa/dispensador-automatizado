@@ -11,8 +11,10 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api  # noqa: E402
+import cuentas  # noqa: E402
 import db  # noqa: E402
 
+cuentas.ITERACIONES = 1_000  # solo en pruebas: hashes más rápidos (en producción 200 000)
 T0 = datetime(2026, 10, 8, 12, 0, 0, tzinfo=timezone.utc)
 
 
@@ -32,9 +34,31 @@ class BaseApi(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.ruta = Path(self._dir.name) / "test.db"
         self.reloj = RelojFalso()
-        self.cli = TestClient(api.crear_app(self.ruta, reloj=self.reloj))
+        self.app = api.crear_app(self.ruta, reloj=self.reloj)
+        # Issue 1: todas las rutas piden sesión. Se crean un cliente y un administrador de prueba
+        # y cada petición lleva el token que corresponde según la ruta.
+        con = db.conectar(self.ruta)
+        cuentas.crear_usuario(con, "admin@x.co", "admin", "clave-admin-123", "ADMIN")
+        # Las pruebas de caducidad adelantan el reloj 24 h; la sesión de prueba dura un año.
+        con.execute("UPDATE configuracion SET valor = '8760' WHERE clave = 'horas_sesion'")
+        con.close()
+        self.anon = TestClient(self.app)  # sin sesión
+        self.token_cliente = self.anon.post("/cuentas/registro", json={
+            "correo": "ana@x.co", "usuario": "ana", "contrasena": "clave-ana-123"}).json()["token"]
+        self.token_admin = self.anon.post("/cuentas/login", json={
+            "usuario": "admin", "contrasena": "clave-admin-123"}).json()["token"]
+        self.cli = TestClient(self.app)
+        self.cli.event_hooks["request"].append(self._poner_token)
+
+    def _poner_token(self, request):
+        ruta = request.url.path
+        es_admin = ruta.startswith("/admin/") or ruta.startswith("/maquina/")
+        if "authorization" not in request.headers:
+            request.headers["Authorization"] = "Bearer " + (
+                self.token_admin if es_admin else self.token_cliente)
 
     def tearDown(self):
+        self.anon.close()
         self.cli.close()
         self._dir.cleanup()
 

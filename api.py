@@ -11,9 +11,11 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import cuentas
 import db
 import servicio
 
@@ -24,9 +26,19 @@ class ItemIn(BaseModel):
 
 
 class PedidoIn(BaseModel):
-    cliente_nombre: str = Field(min_length=1, examples=["Ana Gómez"])
-    cliente_contacto: str = Field(min_length=3, examples=["ana@correo.co"])
+    # El nombre y el contacto salen de la cuenta con la que el cliente inició sesión.
     items: list[ItemIn] = Field(min_length=1)
+
+
+class RegistroIn(BaseModel):
+    correo: str = Field(max_length=120, examples=["ana@correo.co"])
+    usuario: str = Field(max_length=30, examples=["ana_g"])
+    contrasena: str = Field(max_length=128, examples=["una-clave-segura"])
+
+
+class LoginIn(BaseModel):
+    usuario: str = Field(max_length=120, description="Usuario o correo", examples=["ana_g"])
+    contrasena: str = Field(max_length=128, examples=["una-clave-segura"])
 
 
 class VerificacionIn(BaseModel):
@@ -63,11 +75,7 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     if not Path(ruta_bd).exists():
         db.inicializar(ruta_bd).close()
 
-    app = FastAPI(title="Dispensador automatizado - MVP", version="0.2")
-    app.state.ruta_bd = ruta_bd
-    app.state.reloj = reloj or servicio.ahora_utc
-    app.state.desfase = timedelta(0)  # reloj simulado: el admin puede "adelantar" el tiempo
-    app.mount("/pantallas", StaticFiles(directory=CARPETA_PANTALLAS), name="pantallas")
+    bearer = HTTPBearer(auto_error=False)
 
     def conexion(request: Request):
         con = db.conectar(request.app.state.ruta_bd, multihilo=True)
@@ -78,6 +86,33 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
 
     def ahora(request: Request):
         return request.app.state.reloj() + request.app.state.desfase
+
+    def token_de(cred: HTTPAuthorizationCredentials | None = Depends(bearer)):
+        return cred.credentials if cred else None
+
+    def usuario_actual(token=Depends(token_de), con=Depends(conexion), ahora=Depends(ahora)):
+        return cuentas.usuario_por_token(con, token, ahora)
+
+    def proteger(request: Request, token=Depends(token_de), con=Depends(conexion),
+                 ahora=Depends(ahora)):
+        """Toda ruta /admin/... y /maquina/... exige una sesión de administrador."""
+        ruta = request.url.path
+        if ruta.startswith("/admin/") or ruta.startswith("/maquina/"):
+            if cuentas.usuario_por_token(con, token, ahora)["rol"] != "ADMIN":
+                raise cuentas.SinPermiso("Esta acción es solo para administradores.")
+
+    def ver_pedido_propio(pedido_id: int, usuario=Depends(usuario_actual), con=Depends(conexion)):
+        """El cliente solo ve sus pedidos; el administrador ve todos."""
+        if usuario["rol"] != "ADMIN" and servicio.dueno_de_pedido(con, pedido_id) != usuario["id"]:
+            raise servicio.NoEncontrado(f"No existe el pedido {pedido_id}.")
+        return pedido_id
+
+    app = FastAPI(title="Dispensador automatizado - MVP", version="0.3",
+                  dependencies=[Depends(proteger)])
+    app.state.ruta_bd = ruta_bd
+    app.state.reloj = reloj or servicio.ahora_utc
+    app.state.desfase = timedelta(0)  # reloj simulado: el admin puede "adelantar" el tiempo
+    app.mount("/pantallas", StaticFiles(directory=CARPETA_PANTALLAS), name="pantallas")
 
     @app.exception_handler(servicio.ErrorNegocio)
     async def _error_negocio(_, exc: servicio.ErrorNegocio):
@@ -96,6 +131,26 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     def pantalla_admin():
         return FileResponse(CARPETA_PANTALLAS / "admin.html")
 
+    # ------------------------------------------------------------ cuentas
+    @app.post("/cuentas/registro", status_code=201, tags=["Cuentas"],
+              summary="Crear cuenta de cliente (correo, usuario y contraseña) e iniciar sesión")
+    def registro(datos: RegistroIn, con=Depends(conexion), ahora=Depends(ahora)):
+        cuentas.crear_usuario(con, datos.correo, datos.usuario, datos.contrasena, "CLIENTE", ahora)
+        return cuentas.iniciar_sesion(con, datos.usuario, datos.contrasena, ahora)
+
+    @app.post("/cuentas/login", tags=["Cuentas"], summary="Iniciar sesión (cliente o administrador)")
+    def login(datos: LoginIn, con=Depends(conexion), ahora=Depends(ahora)):
+        return cuentas.iniciar_sesion(con, datos.usuario, datos.contrasena, ahora)
+
+    @app.post("/cuentas/logout", tags=["Cuentas"], summary="Cerrar sesión")
+    def logout(token=Depends(token_de), con=Depends(conexion)):
+        cuentas.cerrar_sesion(con, token)
+        return {"sesion_cerrada": True}
+
+    @app.get("/cuentas/yo", tags=["Cuentas"], summary="Datos de la cuenta con sesión iniciada")
+    def yo(usuario=Depends(usuario_actual)):
+        return usuario
+
     # ------------------------------------------------------------ cliente
     @app.get("/productos", tags=["Cliente"], summary="Disponibilidad de productos")
     def productos(con=Depends(conexion)):
@@ -103,28 +158,36 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
 
     @app.post("/pedidos", status_code=201, tags=["Cliente"],
               summary="Crear pedido (carrito). Se asigna casillero o entra en cola")
-    def crear_pedido(datos: PedidoIn, con=Depends(conexion), ahora=Depends(ahora)):
+    def crear_pedido(datos: PedidoIn, usuario=Depends(usuario_actual), con=Depends(conexion),
+                     ahora=Depends(ahora)):
+        if usuario["rol"] != "CLIENTE":
+            raise cuentas.SinPermiso("Los pedidos se hacen con una cuenta de cliente.")
         return servicio.crear_pedido(
-            con, datos.cliente_nombre, datos.cliente_contacto,
-            [(i.sku, i.cantidad) for i in datos.items], ahora)
+            con, usuario["usuario"], usuario["correo"],
+            [(i.sku, i.cantidad) for i in datos.items], ahora, usuario_id=usuario["id"])
+
+    @app.get("/mis-pedidos", tags=["Cliente"], summary="Pedidos de la cuenta con sesión iniciada")
+    def mis_pedidos(usuario=Depends(usuario_actual), con=Depends(conexion)):
+        return servicio.listar_pedidos_de_usuario(con, usuario["id"])
 
     @app.get("/pedidos/{pedido_id}", tags=["Cliente"], summary="Estado de un pedido")
-    def ver_pedido(pedido_id: int, con=Depends(conexion)):
+    def ver_pedido(pedido_id: int = Depends(ver_pedido_propio), con=Depends(conexion)):
         return servicio.obtener_pedido(con, pedido_id)
 
     @app.get("/pedidos/{pedido_id}/notificaciones", tags=["Cliente"],
              summary="Mensajes enviados al cliente (aquí llega el PIN)")
-    def notificaciones(pedido_id: int, con=Depends(conexion)):
+    def notificaciones(pedido_id: int = Depends(ver_pedido_propio), con=Depends(conexion)):
         return servicio.listar_notificaciones(con, pedido_id)
 
     @app.get("/pedidos/{pedido_id}/trazabilidad", tags=["Cliente"],
              summary="Historial completo del pedido, de la reserva a la entrega")
-    def trazabilidad(pedido_id: int, con=Depends(conexion)):
+    def trazabilidad(pedido_id: int = Depends(ver_pedido_propio), con=Depends(conexion)):
         return servicio.listar_bitacora(con, pedido_id)
 
     @app.post("/pedidos/{pedido_id}/cancelar", tags=["Cliente"],
               summary="Cancelar (solo antes de que la banda mueva la caja)")
-    def cancelar(pedido_id: int, con=Depends(conexion), ahora=Depends(ahora)):
+    def cancelar(pedido_id: int = Depends(ver_pedido_propio), con=Depends(conexion),
+                 ahora=Depends(ahora)):
         return servicio.cancelar_pedido(con, pedido_id, ahora)
 
     @app.get("/casilleros", tags=["Cliente"], summary="Códigos de los casilleros")

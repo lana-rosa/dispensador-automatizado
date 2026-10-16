@@ -56,13 +56,28 @@
     .bitacora .t { color: var(--suave); font-size: .8rem; }
   </style>
 </head>
-<body>
+<body data-sesion="admin">
   <header class="barra">
     <h1>📊 Administrador</h1>
-    <nav><a href="/">Inicio</a> · <a href="/cliente">Cliente</a> · <a href="/docs">API</a></nav>
+    <nav><span class="cuenta-barra" id="cuenta-barra"></span> <a href="/">Inicio</a> · <a href="/cliente">Cliente</a> · <a href="/docs">API</a></nav>
   </header>
 
-  <main class="contenedor">
+  <!-- Issue 1: solo entran cuentas con rol ADMIN (se crean con `python crear_admin.py`). -->
+  <section class="acceso oculto" id="acceso">
+    <div class="tarjeta">
+      <h2>🔐 Ingreso de administradores</h2>
+      <p class="ayuda">Las cuentas de administrador no se registran aquí: se crean en el computador
+        del sistema con <code>python crear_admin.py</code>.</p>
+      <form id="form-login">
+        <div class="campo"><label for="l-usuario">Usuario o correo</label><input id="l-usuario" required autocomplete="username"></div>
+        <div class="campo"><label for="l-clave">Contraseña</label><input id="l-clave" type="password" required autocomplete="current-password"></div>
+        <button class="btn ancho">Ingresar</button>
+      </form>
+      <div id="msj-acceso"></div>
+    </div>
+  </section>
+
+  <main class="contenedor oculto" id="panel">
     <section class="kpis" id="kpis"></section>
 
     <div class="rejilla dos">
@@ -151,6 +166,7 @@ async function refrescar() {
     api("/admin/casilleros"), api("/admin/pedidos"), api("/admin/inventario"),
     api("/admin/alertas"), api("/admin/reloj"), api("/admin/maquina"),
   ]);
+  if (![cas, ped, inv, ale, rel, maq].every((r) => r.ok)) return;  // sesión vencida u otro error
   pintarMaquina(maq.datos);
   pintarKpis(cas.datos, inv.datos, ale.datos);
   pintarCasilleros(cas.datos);
@@ -335,8 +351,59 @@ document.body.addEventListener("click", async (e) => {
   }
 });
 
-refrescar();
-setInterval(refrescar, 3000);
+// ---------------------------------------------------------------- acceso (Issue 1)
+let intervalo = null;
+
+function mostrarAcceso(mensaje) {
+  clearInterval(intervalo);
+  $("panel").classList.add("oculto");
+  $("acceso").classList.remove("oculto");
+  $("cuenta-barra").innerHTML = "";
+  $("msj-acceso").innerHTML = mensaje ? `<p class="aviso info">${esc(mensaje)}</p>` : "";
+}
+
+function mostrarPanel(usuario) {
+  $("acceso").classList.add("oculto");
+  $("panel").classList.remove("oculto");
+  $("cuenta-barra").innerHTML =
+    `Admin: <b>${esc(usuario.usuario)}</b> · <button type="button" id="btn-salir">Cerrar sesión</button> ·`;
+  refrescar();
+  clearInterval(intervalo);
+  intervalo = setInterval(refrescar, 3000);
+}
+
+function alPerderSesion() {
+  borrarSesion();
+  mostrarAcceso("La sesión terminó. Ingresa de nuevo.");
+}
+
+$("form-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await api("/cuentas/login", { method: "POST", body: {
+    usuario: $("l-usuario").value.trim(), contrasena: $("l-clave").value } });
+  if (!r.ok) { $("msj-acceso").innerHTML = `<p class="aviso error">${esc(textoError(r))}</p>`; return; }
+  if (r.datos.usuario.rol !== "ADMIN") {
+    $("msj-acceso").innerHTML = '<p class="aviso error">Esta cuenta no es de administrador.</p>';
+    return;
+  }
+  guardarSesion({ token: r.datos.token, usuario: r.datos.usuario });
+  $("l-clave").value = "";
+  mostrarPanel(r.datos.usuario);
+});
+
+$("cuenta-barra").addEventListener("click", async (e) => {
+  if (!e.target.closest("#btn-salir")) return;
+  await api("/cuentas/logout", { method: "POST" });
+  borrarSesion();
+  mostrarAcceso("Cerraste sesión.");
+});
+
+(async () => {
+  if (!leerSesion()) return mostrarAcceso();
+  const r = await api("/cuentas/yo");
+  if (r.ok && r.datos.rol === "ADMIN") mostrarPanel(r.datos);
+  else { borrarSesion(); mostrarAcceso(); }
+})();
 </script>
 </body>
 </html>
