@@ -32,6 +32,13 @@
     .sim-item + .sim-item { margin-top: 10px; }
     .sim-fila { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
     .sim-fila input { width: 110px; }
+    .sim-item.atascado { border-color: #fca5a5; background: #fff7f7; }
+    .banda-estado { display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem; flex-wrap: wrap; }
+    .senales { list-style: none; margin: .4rem 0 0; padding: 0; max-height: 230px; overflow-y: auto;
+      font: .8rem/1.5 ui-monospace, Menlo, Consolas, monospace; background: #0f172a; color: #cbd5e1;
+      border-radius: 10px; padding: .5rem .7rem; }
+    .senales .SENAL { color: #fde68a; } .senales .SENSOR { color: #a7f3d0; }
+    .senales .ALARMA { color: #fca5a5; font-weight: 700; } .senales .ESTADO { color: #93c5fd; }
     .reloj { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
     .reloj .hora { font-weight: 700; font-variant-numeric: tabular-nums; }
 
@@ -49,13 +56,28 @@
     .bitacora .t { color: var(--suave); font-size: .8rem; }
   </style>
 </head>
-<body>
+<body data-sesion="admin">
   <header class="barra">
     <h1>📊 Administrador</h1>
-    <nav><a href="/">Inicio</a> · <a href="/cliente">Cliente</a> · <a href="/docs">API</a></nav>
+    <nav><span class="cuenta-barra" id="cuenta-barra"></span> <a href="/">Inicio</a> · <a href="/cliente">Cliente</a> · <a href="/docs">API</a></nav>
   </header>
 
-  <main class="contenedor">
+  <!-- Issue 1: solo entran cuentas con rol ADMIN (se crean con `python crear_admin.py`). -->
+  <section class="acceso oculto" id="acceso">
+    <div class="tarjeta">
+      <h2>🔐 Ingreso de administradores</h2>
+      <p class="ayuda">Las cuentas de administrador no se registran aquí: se crean en el computador
+        del sistema con <code>python crear_admin.py</code>.</p>
+      <form id="form-login">
+        <div class="campo"><label for="l-usuario">Usuario o correo</label><input id="l-usuario" required autocomplete="username"></div>
+        <div class="campo"><label for="l-clave">Contraseña</label><input id="l-clave" type="password" required autocomplete="current-password"></div>
+        <button class="btn ancho">Ingresar</button>
+      </form>
+      <div id="msj-acceso"></div>
+    </div>
+  </section>
+
+  <main class="contenedor oculto" id="panel">
     <section class="kpis" id="kpis"></section>
 
     <div class="rejilla dos">
@@ -94,11 +116,18 @@
         <section class="tarjeta" style="order:2">
           <h2>🛠️ Simulador de la máquina</h2>
           <p class="ayuda">Mientras no exista el hardware, aquí se simula la banda, la báscula y la cámara.</p>
+          <div class="banda-estado" id="banda-estado"></div>
+          <div id="msj-simulador"></div>
           <div id="simulador"></div>
+          <details style="margin-top:.7rem">
+            <summary><b>📟 Señales de sensores y actuadores</b></summary>
+            <ul class="senales" id="senales"></ul>
+          </details>
         </section>
 
         <section class="tarjeta" style="order:3">
           <h2>🚨 Alertas</h2>
+          <div id="msj-alertas"></div>
           <div id="alertas"></div>
         </section>
 
@@ -129,14 +158,16 @@ const NOMBRE_ALERTA = { ATASCO: "Atasco", ERROR_DESPACHO: "Error de despacho", S
 // No repintar una sección mientras el usuario escribe en ella.
 function escribiendoEn(id) {
   const a = document.activeElement;
-  return a && a.tagName === "INPUT" && $(id).contains(a);
+  return a && ["INPUT", "SELECT"].includes(a.tagName) && $(id).contains(a);
 }
 
 async function refrescar() {
-  const [cas, ped, inv, ale, rel] = await Promise.all([
+  const [cas, ped, inv, ale, rel, maq] = await Promise.all([
     api("/admin/casilleros"), api("/admin/pedidos"), api("/admin/inventario"),
-    api("/admin/alertas"), api("/admin/reloj"),
+    api("/admin/alertas"), api("/admin/reloj"), api("/admin/maquina"),
   ]);
+  if (![cas, ped, inv, ale, rel, maq].every((r) => r.ok)) return;  // sesión vencida u otro error
+  pintarMaquina(maq.datos);
   pintarKpis(cas.datos, inv.datos, ale.datos);
   pintarCasilleros(cas.datos);
   pintarPedidos(ped.datos);
@@ -190,13 +221,43 @@ function pintarInventario(inv) {
     </tr>`).join("");
 }
 
+function pintarMaquina(m) {
+  $("banda-estado").innerHTML = m.banda === "REPOSO"
+    ? '<span class="chip verde">Banda en reposo</span>'
+    : `<span class="chip rojo">Banda DETENIDA por atasco</span> <span class="ayuda" style="margin:0">pedido #${m.pedido_atascado}</span>`;
+  $("senales").innerHTML = m.senales.map((s) => {
+    const clase = s.tipo.split("_").slice(1).join("_");
+    return `<li class="${esc(clase)}">#${s.pedido_id ?? "-"} ${esc(s.tipo)} ${esc(s.detalle || "")}</li>`;
+  }).join("") || "<li>Sin señales todavía.</li>";
+}
+
+const OPCIONES_ATASCO = `
+  <option value="">Sin atasco</option>
+  <option value="S_ENTRADA">Atasco antes del sensor de entrada</option>
+  <option value="S_DESVIO">Atasco antes del desvío</option>
+  <option value="S_CASILLERO">Atasco al entrar al casillero</option>`;
+
 function pintarSimulador(pedidos) {
-  const activos = pedidos.filter((p) => ["ASIGNADO", "VERIFICANDO"].includes(p.estado)).reverse();
-  $("simulador").innerHTML = activos.map((p) => p.estado === "ASIGNADO" ? `
+  const activos = pedidos.filter((p) => ["ASIGNADO", "ATASCADO", "VERIFICANDO"].includes(p.estado)).reverse();
+  $("simulador").innerHTML = activos.map((p) => {
+    if (p.estado === "ASIGNADO") return `
     <div class="sim-item">
       <div class="sim-fila"><b>Pedido #${p.id}</b> → casillero <b>${esc(p.casillero)}</b> ${chipEstado(p.estado)}</div>
-      <button class="btn chico" data-llegada="${p.id}">▶ Encender banda y llevar al casillero</button>
-    </div>` : `
+      <div class="sim-fila">
+        <select class="entrada" id="atasco-${p.id}" style="width:auto" aria-label="Simular atasco">${OPCIONES_ATASCO}</select>
+        <button class="btn chico" data-despachar="${p.id}">▶ Despachar por la banda</button>
+      </div>
+    </div>`;
+    if (p.estado === "ATASCADO") return `
+    <div class="sim-item atascado">
+      <div class="sim-fila"><b>Pedido #${p.id}</b> → casillero <b>${esc(p.casillero)}</b> ${chipEstado(p.estado)}</div>
+      <div class="ayuda" style="margin:0">Motores detenidos. Despeje la banda y reintente, o cancele el pedido.</div>
+      <div class="sim-fila">
+        <button class="btn chico" data-despachar="${p.id}">🔁 Reintentar</button>
+        <button class="btn chico peligro" data-cancelar-admin="${p.id}">✖ Cancelar pedido</button>
+      </div>
+    </div>`;
+    return `
     <div class="sim-item">
       <div class="sim-fila"><b>Pedido #${p.id}</b> en casillero <b>${esc(p.casillero)}</b> ${chipEstado(p.estado)}</div>
       <div class="ayuda" style="margin:0">Peso teórico: <b>${p.peso_teorico_g} g</b>. Cambia el valor para simular un error.</div>
@@ -205,7 +266,8 @@ function pintarSimulador(pedidos) {
         <span>g</span>
         <button class="btn chico" data-pesar="${p.id}">⚖️📷 Pesar y fotografiar</button>
       </div>
-    </div>`).join("") || '<p class="vacio">No hay pedidos esperando la máquina.</p>';
+    </div>`;
+  }).join("") || '<p class="vacio">No hay pedidos esperando la máquina.</p>';
 }
 
 function pintarAlertas(alertas) {
@@ -235,9 +297,31 @@ document.body.addEventListener("click", async (e) => {
   const d = b.dataset;
   if (d.mant) await accion(api(`/admin/casilleros/${d.mant}/mantenimiento`, { method: "POST" }));
   if (d.liberar) await accion(api(`/admin/casilleros/${d.liberar}/liberar`, { method: "POST" }));
-  if (d.llegada) await accion(api(`/maquina/pedidos/${d.llegada}/llegada`, { method: "POST" }));
+  if (d.despachar) {
+    const sel = $(`atasco-${d.despachar}`);
+    const atasco = sel ? sel.value : "";
+    b.disabled = true;
+    const r = await accion(api(`/maquina/pedidos/${d.despachar}/despachar`, { method: "POST",
+      body: atasco ? { atasco_en: atasco } : undefined }));
+    if (r.ok) {
+      $("msj-simulador").innerHTML = r.datos.exito
+        ? `<p class="aviso ok">✅ Pedido #${esc(d.despachar)}: la caja llegó al casillero en ${r.datos.duracion_s} s. Ahora pésela.</p>`
+        : `<p class="aviso error">⛔ Pedido #${esc(d.despachar)}: atasco, ${esc(r.datos.sensor_fallido)} no detectó la caja. Motores detenidos y alerta enviada.</p>`;
+      $("senales").closest("details").open = true;
+    }
+  }
+  if (d.cancelarAdmin && confirm(`¿Cancelar el pedido #${d.cancelarAdmin}? La caja se retira a mano de la banda.`)) {
+    const r = await accion(api(`/admin/pedidos/${d.cancelarAdmin}/cancelar`, { method: "POST" }));
+    if (r.ok) $("msj-simulador").innerHTML = `<p class="aviso info">Pedido #${esc(d.cancelarAdmin)} cancelado. La banda volvió a reposo y el stock al inventario.</p>`;
+  }
   if (d.atender) await accion(api(`/admin/alertas/${d.atender}/atender`, { method: "POST" }));
-  if (d.reemitir) await accion(api(`/admin/pedidos/${d.reemitir}/reemitir-pin`, { method: "POST" }));
+  if (d.reemitir) {
+    b.disabled = true;  // evita un segundo clic mientras responde el servidor
+    const r = await accion(api(`/admin/pedidos/${d.reemitir}/reemitir-pin`, { method: "POST" }));
+    $("msj-alertas").innerHTML = r.ok
+      ? `<p class="aviso ok">✅ Se envió un nuevo PIN al cliente del pedido #${esc(d.reemitir)} (casillero ${esc(r.datos.casillero)}). La alerta quedó atendida.</p>`
+      : "";
+  }
   if (d.reab) {
     const cantidad = Number($(`reab-${d.reab}`).value);
     await accion(api(`/admin/productos/${d.reab}/reabastecer`, { method: "POST", body: { cantidad } }));
@@ -267,8 +351,59 @@ document.body.addEventListener("click", async (e) => {
   }
 });
 
-refrescar();
-setInterval(refrescar, 3000);
+// ---------------------------------------------------------------- acceso (Issue 1)
+let intervalo = null;
+
+function mostrarAcceso(mensaje) {
+  clearInterval(intervalo);
+  $("panel").classList.add("oculto");
+  $("acceso").classList.remove("oculto");
+  $("cuenta-barra").innerHTML = "";
+  $("msj-acceso").innerHTML = mensaje ? `<p class="aviso info">${esc(mensaje)}</p>` : "";
+}
+
+function mostrarPanel(usuario) {
+  $("acceso").classList.add("oculto");
+  $("panel").classList.remove("oculto");
+  $("cuenta-barra").innerHTML =
+    `Admin: <b>${esc(usuario.usuario)}</b> · <button type="button" id="btn-salir">Cerrar sesión</button> ·`;
+  refrescar();
+  clearInterval(intervalo);
+  intervalo = setInterval(refrescar, 3000);
+}
+
+function alPerderSesion() {
+  borrarSesion();
+  mostrarAcceso("La sesión terminó. Ingresa de nuevo.");
+}
+
+$("form-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await api("/cuentas/login", { method: "POST", body: {
+    usuario: $("l-usuario").value.trim(), contrasena: $("l-clave").value } });
+  if (!r.ok) { $("msj-acceso").innerHTML = `<p class="aviso error">${esc(textoError(r))}</p>`; return; }
+  if (r.datos.usuario.rol !== "ADMIN") {
+    $("msj-acceso").innerHTML = '<p class="aviso error">Esta cuenta no es de administrador.</p>';
+    return;
+  }
+  guardarSesion({ token: r.datos.token, usuario: r.datos.usuario });
+  $("l-clave").value = "";
+  mostrarPanel(r.datos.usuario);
+});
+
+$("cuenta-barra").addEventListener("click", async (e) => {
+  if (!e.target.closest("#btn-salir")) return;
+  await api("/cuentas/logout", { method: "POST" });
+  borrarSesion();
+  mostrarAcceso("Cerraste sesión.");
+});
+
+(async () => {
+  if (!leerSesion()) return mostrarAcceso();
+  const r = await api("/cuentas/yo");
+  if (r.ok && r.datos.rol === "ADMIN") mostrarPanel(r.datos);
+  else { borrarSesion(); mostrarAcceso(); }
+})();
 </script>
 </body>
 </html>

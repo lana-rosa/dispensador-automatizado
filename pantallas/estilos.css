@@ -111,3 +111,12 @@ dialog .pie { padding: 12px 16px; border-top: 1px solid var(--borde); text-align
 @media (max-width: 899px) {
   .rejilla.dos > .columna { display: contents; }
 }
+
+/* Pantallas de acceso (crear cuenta / iniciar sesión) */
+.acceso { max-width: 440px; margin: 32px auto; padding: 0 16px; }
+.pestanas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--gris-fondo);
+  border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+.pestanas button { border: 0; border-radius: 9px; padding: .55rem; background: transparent; font-weight: 600; color: var(--suave); }
+.pestanas button.activa { background: #fff; color: var(--texto); box-shadow: var(--sombra); }
+.cuenta-barra { color: #cbd5e1; font-size: .9rem; }
+.cuenta-barra button { background: none; border: 0; color: #93c5fd; padding: 0; font-size: .9rem; }

@@ -36,13 +36,38 @@
     .cerradura { text-align: center; font-size: 3rem; line-height: 1; margin-top: .6rem; }
   </style>
 </head>
-<body>
+<body data-sesion="cliente">
   <header class="barra">
     <h1>🛒 Cliente</h1>
-    <nav><a href="/">Inicio</a> · <a href="/admin">Administrador</a></nav>
+    <nav><span class="cuenta-barra" id="cuenta-barra"></span> <a href="/">Inicio</a> · <a href="/admin">Administrador</a></nav>
   </header>
 
-  <main class="contenedor rejilla dos">
+  <!-- Issue 1: lo primero que hace el cliente es crear su cuenta (o iniciar sesión). -->
+  <section class="acceso oculto" id="acceso">
+    <div class="tarjeta">
+      <h2>Bienvenido 👋</h2>
+      <p class="ayuda">Para pedir necesitas una cuenta. Así tus pedidos y tu PIN quedan solo a tu nombre.</p>
+      <div class="pestanas">
+        <button type="button" data-pestana="registro" class="activa">Crear cuenta</button>
+        <button type="button" data-pestana="login">Ya tengo cuenta</button>
+      </div>
+      <form id="form-registro">
+        <div class="campo"><label for="r-correo">Correo</label><input id="r-correo" type="email" required autocomplete="email"></div>
+        <div class="campo"><label for="r-usuario">Usuario</label><input id="r-usuario" required minlength="3" maxlength="30" pattern="[A-Za-z0-9_.\-]+" title="Letras, números, punto, guion o guion bajo" autocomplete="username"></div>
+        <div class="campo"><label for="r-clave">Contraseña (mínimo 8 caracteres)</label><input id="r-clave" type="password" required minlength="8" autocomplete="new-password"></div>
+        <div class="campo"><label for="r-clave2">Repite la contraseña</label><input id="r-clave2" type="password" required minlength="8" autocomplete="new-password"></div>
+        <button class="btn ancho">Crear cuenta</button>
+      </form>
+      <form id="form-login" class="oculto">
+        <div class="campo"><label for="l-usuario">Usuario o correo</label><input id="l-usuario" required autocomplete="username"></div>
+        <div class="campo"><label for="l-clave">Contraseña</label><input id="l-clave" type="password" required autocomplete="current-password"></div>
+        <button class="btn ancho">Iniciar sesión</button>
+      </form>
+      <div id="msj-acceso"></div>
+    </div>
+  </section>
+
+  <main class="contenedor rejilla dos oculto" id="tienda">
     <div class="columna">
       <section class="tarjeta" style="order:1">
         <h2>1. Elige tus productos</h2>
@@ -53,7 +78,7 @@
       <section class="tarjeta" style="order:3">
         <h2>3. Mis pedidos</h2>
         <p class="ayuda">Se actualiza solo. Cuando tu pedido esté listo, aquí verás tu PIN.</p>
-        <div id="mis-pedidos"><p class="vacio">Aún no has hecho pedidos desde este navegador.</p></div>
+        <div id="mis-pedidos"><p class="vacio">Aún no has hecho pedidos.</p></div>
       </section>
     </div>
 
@@ -62,8 +87,7 @@
         <h2>2. Tu carrito</h2>
         <div id="carrito"><p class="vacio">El carrito está vacío.</p></div>
         <form id="form-pedido">
-          <div class="campo"><label for="nombre">Nombre</label><input id="nombre" required autocomplete="name"></div>
-          <div class="campo"><label for="contacto">Correo o celular</label><input id="contacto" required minlength="3"></div>
+          <p class="ayuda" id="a-nombre-de"></p>
           <button class="btn ancho" id="btn-pedir" disabled>Hacer pedido</button>
         </form>
         <div id="msj-pedido"></div>
@@ -87,14 +111,90 @@
 const carrito = {};          // sku -> cantidad
 let productos = [];
 let pinDigitado = "";
-const CLAVE = "dispensador.misPedidos";
+let intervalos = [];
 
-function misPedidos() {
-  try { return JSON.parse(localStorage.getItem(CLAVE)) || []; } catch (_) { return []; }
+// ---------------------------------------------------------------- cuenta (Issue 1)
+function mostrarAcceso(mensaje) {
+  intervalos.forEach(clearInterval); intervalos = [];
+  document.getElementById("tienda").classList.add("oculto");
+  document.getElementById("acceso").classList.remove("oculto");
+  document.getElementById("cuenta-barra").innerHTML = "";
+  document.getElementById("msj-acceso").innerHTML = mensaje ? `<p class="aviso info">${esc(mensaje)}</p>` : "";
 }
-function guardarMisPedidos(ids) {
-  try { localStorage.setItem(CLAVE, JSON.stringify(ids)); } catch (_) {}
+
+function mostrarTienda(usuario) {
+  document.getElementById("acceso").classList.add("oculto");
+  document.getElementById("tienda").classList.remove("oculto");
+  document.getElementById("cuenta-barra").innerHTML =
+    `Hola, <b>${esc(usuario.usuario)}</b> · <button type="button" id="btn-salir">Cerrar sesión</button> ·`;
+  document.getElementById("a-nombre-de").textContent = `El pedido queda a nombre de ${usuario.usuario} (${usuario.correo}).`;
+  cargarProductos();
+  cargarCasilleros();
+  cargarMisPedidos();
+  intervalos.forEach(clearInterval);
+  intervalos = [
+    setInterval(() => { cargarMisPedidos(); }, 4000),
+    setInterval(() => { if (!Object.keys(carrito).length) cargarProductos(); }, 10000),
+  ];
 }
+
+function alPerderSesion() {
+  borrarSesion();
+  mostrarAcceso("Tu sesión terminó. Inicia sesión de nuevo.");
+}
+
+document.querySelector(".pestanas").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pestana]");
+  if (!b) return;
+  document.querySelectorAll(".pestanas button").forEach((x) => x.classList.toggle("activa", x === b));
+  document.getElementById("form-registro").classList.toggle("oculto", b.dataset.pestana !== "registro");
+  document.getElementById("form-login").classList.toggle("oculto", b.dataset.pestana !== "login");
+  document.getElementById("msj-acceso").innerHTML = "";
+});
+
+async function entrar(ruta, cuerpo) {
+  const r = await api(ruta, { method: "POST", body: cuerpo });
+  if (!r.ok) {
+    document.getElementById("msj-acceso").innerHTML = `<p class="aviso error">${esc(textoError(r))}</p>`;
+    return;
+  }
+  if (r.datos.usuario.rol !== "CLIENTE") {
+    document.getElementById("msj-acceso").innerHTML =
+      '<p class="aviso error">Esta es una cuenta de administrador. Úsala en la pantalla del administrador.</p>';
+    return;
+  }
+  guardarSesion({ token: r.datos.token, usuario: r.datos.usuario });
+  mostrarTienda(r.datos.usuario);
+}
+
+document.getElementById("form-registro").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const clave = document.getElementById("r-clave").value;
+  if (clave !== document.getElementById("r-clave2").value) {
+    document.getElementById("msj-acceso").innerHTML = '<p class="aviso error">Las contraseñas no coinciden.</p>';
+    return;
+  }
+  entrar("/cuentas/registro", {
+    correo: document.getElementById("r-correo").value.trim(),
+    usuario: document.getElementById("r-usuario").value.trim(),
+    contrasena: clave,
+  });
+});
+
+document.getElementById("form-login").addEventListener("submit", (e) => {
+  e.preventDefault();
+  entrar("/cuentas/login", {
+    usuario: document.getElementById("l-usuario").value.trim(),
+    contrasena: document.getElementById("l-clave").value,
+  });
+});
+
+document.getElementById("cuenta-barra").addEventListener("click", async (e) => {
+  if (!e.target.closest("#btn-salir")) return;
+  await api("/cuentas/logout", { method: "POST" });
+  borrarSesion();
+  mostrarAcceso("Cerraste sesión.");
+});
 
 // ---------------------------------------------------------------- productos y carrito
 async function cargarProductos() {
@@ -150,13 +250,10 @@ document.getElementById("form-pedido").addEventListener("submit", async (e) => {
   const btn = document.getElementById("btn-pedir");
   btn.disabled = true;
   const r = await api("/pedidos", { method: "POST", body: {
-    cliente_nombre: document.getElementById("nombre").value.trim(),
-    cliente_contacto: document.getElementById("contacto").value.trim(),
     items: Object.entries(carrito).map(([sku, cantidad]) => ({ sku, cantidad })),
   }});
   if (r.ok) {
     const p = r.datos;
-    guardarMisPedidos([p.id, ...misPedidos()]);
     Object.keys(carrito).forEach((k) => delete carrito[k]);
     msj.innerHTML = p.estado === "EN_COLA"
       ? `<p class="aviso info">Pedido #${p.id} aceptado. Todos los casilleros están ocupados: quedó en cola (posición ${p.posicion_en_cola}).</p>`
@@ -171,21 +268,16 @@ document.getElementById("form-pedido").addEventListener("submit", async (e) => {
 
 // ---------------------------------------------------------------- mis pedidos
 async function cargarMisPedidos() {
-  const ids = misPedidos();
-  const caja = document.getElementById("mis-pedidos");
-  if (!ids.length) { caja.innerHTML = '<p class="vacio">Aún no has hecho pedidos desde este navegador.</p>'; return; }
-  const vigentes = [];
+  // Issue 1: los pedidos salen de la cuenta, no del navegador.
+  const r = await api("/mis-pedidos");
+  if (!r.ok) return;
   const tarjetas = [];
-  for (const id of ids) {
-    const r = await api(`/pedidos/${id}`);
-    if (!r.ok) continue;  // la base se reinició: se olvida el pedido
-    vigentes.push(id);
-    const p = r.datos;
-    const notis = (await api(`/pedidos/${id}/notificaciones`)).datos || [];
+  for (const p of r.datos) {
+    const notis = (await api(`/pedidos/${p.id}/notificaciones`)).datos || [];
     tarjetas.push(tarjetaPedido(p, notis));
   }
-  if (vigentes.length !== ids.length) guardarMisPedidos(vigentes);
-  caja.innerHTML = tarjetas.join("") || '<p class="vacio">Aún no has hecho pedidos desde este navegador.</p>';
+  document.getElementById("mis-pedidos").innerHTML =
+    tarjetas.join("") || '<p class="vacio">Aún no has hecho pedidos.</p>';
 }
 
 function tarjetaPedido(p, notis) {
@@ -196,17 +288,21 @@ function tarjetaPedido(p, notis) {
     if (m) { pin = m[1]; break; }
   }
   const ultimo = notis.length ? notis[notis.length - 1].mensaje : "";
+  // Listo para retirar pero sin PIN vigente = el PIN se bloqueó por intentos fallidos.
+  const bloqueado = p.estado === "LISTO_RETIRO" && !p.pin_expira_en;
+  const listo = p.estado === "LISTO_RETIRO" && !bloqueado && pin;
   const extra = p.estado === "EN_COLA" ? ` · posición ${p.posicion_en_cola} en la cola` : "";
   return `<div class="pedido">
     <div class="cab"><b>Pedido #${p.id}</b>${chipEstado(p.estado)}</div>
     <div class="detalle">${resumenItems(p.items)}</div>
     <div class="detalle">${esc(explicacion)}${extra}${p.casillero ? ` · Casillero <b>${esc(p.casillero)}</b>` : ""}</div>
-    ${p.estado === "LISTO_RETIRO" && pin ? `<div class="pin-caja">
+    ${bloqueado ? `<p class="aviso error">🔒 Tu PIN se bloqueó por 3 intentos fallidos. El administrador te enviará uno nuevo por aquí.</p>` : ""}
+    ${listo ? `<div class="pin-caja">
         <div class="detalle" style="margin:0">Tu PIN (vence ${fecha(p.pin_expira_en)})</div>
         <div class="pin">${esc(pin)}</div></div>` : ""}
     ${ultimo && p.estado !== "LISTO_RETIRO" && !/PIN: /.test(ultimo) ? `<div class="detalle">📩 ${esc(ultimo)}</div>` : ""}
     <div class="acciones">
-      ${p.estado === "LISTO_RETIRO" && pin ? `<button class="btn chico" data-usar="${esc(p.casillero)}" data-pin="${esc(pin)}">Ir a retirar</button>` : ""}
+      ${listo ? `<button class="btn chico" data-usar="${esc(p.casillero)}" data-pin="${esc(pin)}">Ir a retirar</button>` : ""}
       ${["EN_COLA", "ASIGNADO"].includes(p.estado) ? `<button class="btn chico peligro" data-cancelar="${p.id}">Cancelar pedido</button>` : ""}
     </div>
   </div>`;
@@ -284,11 +380,12 @@ document.getElementById("btn-abrir").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------- arranque
-cargarProductos();
-cargarCasilleros();
-cargarMisPedidos();
-setInterval(() => { cargarMisPedidos(); }, 4000);
-setInterval(() => { if (!Object.keys(carrito).length) cargarProductos(); }, 10000);
+(async () => {
+  if (!leerSesion()) return mostrarAcceso();
+  const r = await api("/cuentas/yo");
+  if (r.ok && r.datos.rol === "CLIENTE") mostrarTienda(r.datos);
+  else { borrarSesion(); mostrarAcceso(); }
+})();
 </script>
 </body>
 </html>
