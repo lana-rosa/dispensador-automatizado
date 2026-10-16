@@ -196,17 +196,21 @@ function tarjetaPedido(p, notis) {
     if (m) { pin = m[1]; break; }
   }
   const ultimo = notis.length ? notis[notis.length - 1].mensaje : "";
+  // Listo para retirar pero sin PIN vigente = el PIN se bloqueó por intentos fallidos.
+  const bloqueado = p.estado === "LISTO_RETIRO" && !p.pin_expira_en;
+  const listo = p.estado === "LISTO_RETIRO" && !bloqueado && pin;
   const extra = p.estado === "EN_COLA" ? ` · posición ${p.posicion_en_cola} en la cola` : "";
   return `<div class="pedido">
     <div class="cab"><b>Pedido #${p.id}</b>${chipEstado(p.estado)}</div>
     <div class="detalle">${resumenItems(p.items)}</div>
     <div class="detalle">${esc(explicacion)}${extra}${p.casillero ? ` · Casillero <b>${esc(p.casillero)}</b>` : ""}</div>
-    ${p.estado === "LISTO_RETIRO" && pin ? `<div class="pin-caja">
+    ${bloqueado ? `<p class="aviso error">🔒 Tu PIN se bloqueó por 3 intentos fallidos. El administrador te enviará uno nuevo por aquí.</p>` : ""}
+    ${listo ? `<div class="pin-caja">
         <div class="detalle" style="margin:0">Tu PIN (vence ${fecha(p.pin_expira_en)})</div>
         <div class="pin">${esc(pin)}</div></div>` : ""}
     ${ultimo && p.estado !== "LISTO_RETIRO" && !/PIN: /.test(ultimo) ? `<div class="detalle">📩 ${esc(ultimo)}</div>` : ""}
     <div class="acciones">
-      ${p.estado === "LISTO_RETIRO" && pin ? `<button class="btn chico" data-usar="${esc(p.casillero)}" data-pin="${esc(pin)}">Ir a retirar</button>` : ""}
+      ${listo ? `<button class="btn chico" data-usar="${esc(p.casillero)}" data-pin="${esc(pin)}">Ir a retirar</button>` : ""}
       ${["EN_COLA", "ASIGNADO"].includes(p.estado) ? `<button class="btn chico peligro" data-cancelar="${p.id}">Cancelar pedido</button>` : ""}
     </div>
   </div>`;
