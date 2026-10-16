@@ -99,6 +99,7 @@
 
         <section class="tarjeta" style="order:3">
           <h2>🚨 Alertas</h2>
+          <div id="msj-alertas"></div>
           <div id="alertas"></div>
         </section>
 
@@ -237,7 +238,13 @@ document.body.addEventListener("click", async (e) => {
   if (d.liberar) await accion(api(`/admin/casilleros/${d.liberar}/liberar`, { method: "POST" }));
   if (d.llegada) await accion(api(`/maquina/pedidos/${d.llegada}/llegada`, { method: "POST" }));
   if (d.atender) await accion(api(`/admin/alertas/${d.atender}/atender`, { method: "POST" }));
-  if (d.reemitir) await accion(api(`/admin/pedidos/${d.reemitir}/reemitir-pin`, { method: "POST" }));
+  if (d.reemitir) {
+    b.disabled = true;  // evita un segundo clic mientras responde el servidor
+    const r = await accion(api(`/admin/pedidos/${d.reemitir}/reemitir-pin`, { method: "POST" }));
+    $("msj-alertas").innerHTML = r.ok
+      ? `<p class="aviso ok">✅ Se envió un nuevo PIN al cliente del pedido #${esc(d.reemitir)} (casillero ${esc(r.datos.casillero)}). La alerta quedó atendida.</p>`
+      : "";
+  }
   if (d.reab) {
     const cantidad = Number($(`reab-${d.reab}`).value);
     await accion(api(`/admin/productos/${d.reab}/reabastecer`, { method: "POST", body: { cantidad } }));
