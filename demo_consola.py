@@ -1,4 +1,4 @@
-"""Demostración en consola del flujo completo (usa una BD temporal, no toca dispensador.db).
+"""Demostración en consola del flujo completo (P1-P6) (usa una BD temporal, no toca dispensador.db).
 
     python3 demo_consola.py
 """
@@ -31,7 +31,7 @@ def pin_de(pid):
 
 
 def verificar(pid, peso):
-    cli.post(f"/maquina/pedidos/{pid}/llegada")
+    cli.post(f"/maquina/pedidos/{pid}/despachar")
     return cli.post(f"/maquina/pedidos/{pid}/verificacion",
                     json={"peso_medido_g": peso, "foto_ruta": f"fotos/pedido{pid}.jpg"}).json()
 
@@ -61,6 +61,19 @@ print("Notificación:", cli.get(f"/pedidos/{p6['id']}/notificaciones").json()[-1
 for a in cli.get("/admin/alertas").json():
     if a["tipo"] == "ERROR_DESPACHO":
         print("ALERTA AL ADMIN:", a["mensaje"])
+
+titulo("P4 - Atasco en la banda: se detienen los motores y se alerta")
+p4 = pedir([{"sku": "MULTI-DT830", "cantidad": 1}])
+r4 = cli.post(f"/maquina/pedidos/{p4['id']}/despachar", json={"atasco_en": "S_DESVIO"}).json()
+for ev in r4["eventos"]:
+    print(f"  t={ev['t']:>5}s  {ev['tipo']:<7} {ev['detalle']}")
+print(f"Pedido #{p4['id']}:", r4["pedido"]["estado"], "| banda:", cli.get("/admin/maquina").json()["banda"])
+for a in cli.get("/admin/alertas").json():
+    if a["tipo"] == "ATASCO":
+        print("ALERTA AL ADMIN:", a["mensaje"])
+print("El administrador cancela el pedido atascado ->",
+      cli.post(f"/admin/pedidos/{p4['id']}/cancelar").json()["estado"],
+      "| banda:", cli.get("/admin/maquina").json()["banda"])
 
 titulo("P3 - Todos los casilleros ocupados: el pedido entra en cola")
 while True:
