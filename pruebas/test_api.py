@@ -127,6 +127,36 @@ class PruebasFlujo(BaseApi):
         self.assertEqual(self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin").status_code, 200)
         self.assertEqual(self.cli.post(url, json={"pin": self.pin_de(pedido["id"])}).status_code, 200)
 
+    def test_reemitir_pin_atiende_la_alerta_y_no_se_repite(self):
+        # Issue 3: al reemitir, la alerta de PIN bloqueado debe desaparecer de pendientes.
+        pedido = self.pedir()
+        self.llevar_y_verificar(pedido["id"], 25.0)
+        pin = self.pin_de(pedido["id"])
+        malo = "000000" if pin != "000000" else "111111"
+        for _ in range(3):
+            self.cli.post(f"/casilleros/{pedido['casillero']}/abrir", json={"pin": malo})
+        self.assertIsNone(self.cli.get(f"/pedidos/{pedido['id']}").json()["pin_expira_en"])
+        r = self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin")
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNotNone(r.json()["pin_expira_en"])
+        self.assertNotIn("PIN_BLOQUEADO", [a["tipo"] for a in self.cli.get("/admin/alertas").json()])
+        nuevo = self.pin_de(pedido["id"])
+        self.assertNotEqual(nuevo, pin)
+        # Un segundo clic ya no tiene PIN bloqueado que reemitir.
+        self.assertEqual(self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin").status_code, 409)
+
+    def test_pedido_con_pin_reemitido_caduca_una_sola_vez(self):
+        # Issue 3: el PIN viejo bloqueado no debe romper el barrido de caducidad.
+        pedido = self.pedir()
+        self.llevar_y_verificar(pedido["id"], 25.0)
+        for _ in range(3):
+            self.cli.post(f"/casilleros/{pedido['casillero']}/abrir", json={"pin": "999999"})
+        self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin")
+        self.reloj.avanzar(hours=24, seconds=1)
+        r = self.cli.post("/admin/caducar-vencidos")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["pedidos_caducados"], [pedido["id"]])
+
     def test_P3_casilleros_llenos_entra_en_cola_y_se_despacha_al_liberarse(self):
         primeros = [self.pedir() for _ in range(6)]  # hay 6 casilleros
         self.assertTrue(all(p["estado"] == "ASIGNADO" for p in primeros))

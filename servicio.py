@@ -544,39 +544,27 @@ def reemitir_pin(con, pedido_id, ahora=None):
     ahora = ahora or ahora_utc()
     with transaccion(con):
         pedido = _pedido_fila(con, pedido_id)
-        
-        # Buscar el PIN que actualmente está bloqueando el flujo
         bloqueado = con.execute(
             "SELECT * FROM pins WHERE pedido_id = ? AND estado = 'BLOQUEADO'"
             " ORDER BY id DESC LIMIT 1", (pedido_id,)).fetchone()
-            
         if pedido["estado"] != "LISTO_RETIRO" or bloqueado is None:
             raise EstadoInvalido(f"El pedido {pedido_id} no tiene un PIN bloqueado.")
-            
-        # =====================================================================
-        # SOLUCIÓN AL ERROR: Desactivar el PIN bloqueado viejo para limpiar 
-        # el índice único antes de insertar el nuevo registro 'VIGENTE'.
-        # =====================================================================
-        con.execute(
-            "UPDATE pins SET estado = 'CADUCADO' WHERE id = ?", (bloqueado["id"],)
-        )
-        
-        # Ahora sí, el índice único está libre y se genera el nuevo PIN sin errores
+        # El PIN bloqueado queda reemplazado. Si siguiera como BLOQUEADO, un segundo clic
+        # intentaría emitir otro PIN (error 500) y el barrido de 24 h caducaría dos veces.
+        con.execute("UPDATE pins SET estado = 'CADUCADO' WHERE id = ?", (bloqueado["id"],))
         pin, expira = _emitir_pin(con, ahora, pedido_id, pedido["casillero_id"],
                                   expira_en=bloqueado["expira_en"])
-                                  
         codigo = con.execute("SELECT codigo FROM casilleros WHERE id = ?",
                              (pedido["casillero_id"],)).fetchone()[0]
-                             
-        _bitacora(con, ahora, "PIN_REEMITIDO", f"Nuevo PIN generado tras bloqueo.", pedido_id, pedido["casillero_id"])
-        
-        # Esta línea inyecta el nuevo código en la bandeja de salida que lee la pantalla del cliente
+        _bitacora(con, ahora, "PIN_REEMITIDO", None, pedido_id, pedido["casillero_id"])
         _notificar(con, ahora, pedido_id,
                    f"Se emitió un nuevo PIN para el casillero {codigo}. PIN: {pin}. "
                    f"Vigente hasta {expira} (UTC).")
-                   
+        # La alerta queda resuelta: así el administrador ve que su acción tuvo efecto
+        # y el botón «Reemitir PIN» no queda disponible para un segundo clic.
+        con.execute("UPDATE alertas SET atendida = 1, atendida_en = ? WHERE tipo = 'PIN_BLOQUEADO'"
+                    " AND atendida = 0 AND pedido_id = ?", (fmt(ahora), pedido_id))
     return obtener_pedido(con, pedido_id)
-
 
 
 def listar_pedidos(con, limite=100):
