@@ -17,6 +17,8 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+import maquina
+
 FORMATO_FECHA = "%Y-%m-%dT%H:%M:%SZ"
 
 # Qué cambios de estado de un pedido son legales. Cualquier otro se rechaza.
@@ -298,31 +300,109 @@ def listar_bitacora(con, pedido_id):
         (pedido_id,))]
 
 
-def cancelar_pedido(con, pedido_id, ahora=None):
-    """Solo se puede cancelar antes de que la banda mueva la caja."""
+def cancelar_pedido(con, pedido_id, ahora=None, por_admin=False):
+    """El cliente solo cancela antes de que la banda mueva la caja. El administrador además
+    puede cancelar un pedido ATASCADO (la caja se retira a mano de la banda)."""
     ahora = ahora or ahora_utc()
+    permitidos = ("EN_COLA", "ASIGNADO", "ATASCADO") if por_admin else ("EN_COLA", "ASIGNADO")
     with transaccion(con):
         pedido = _pedido_fila(con, pedido_id)
-        if pedido["estado"] not in ("EN_COLA", "ASIGNADO"):
+        if pedido["estado"] not in permitidos:
             raise EstadoInvalido(
                 f"El pedido {pedido_id} está {pedido['estado']} y ya no se puede cancelar.")
-        _cambiar_estado(con, ahora, pedido_id, "CANCELADO", "Cancelado por el cliente.")
+        quien = "el administrador" if por_admin else "el cliente"
+        _cambiar_estado(con, ahora, pedido_id, "CANCELADO", f"Cancelado por {quien}.")
         _liberar_stock(con, pedido_id, devolver=True)
+        if pedido["estado"] == "ATASCADO":
+            _atender_alertas(con, ahora, "ATASCO", pedido_id)
+            _bitacora(con, ahora, "BANDA_ESTADO", "DETENIDA_ATASCO -> REPOSO (caja retirada)",
+                      pedido_id, pedido["casillero_id"])
         if pedido["casillero_id"]:
             _set_casillero(con, ahora, pedido["casillero_id"], "LIBRE")
             _despachar_cola(con, ahora)
     return obtener_pedido(con, pedido_id)
 
 
-# ------------------------------------------------------------------ transporte (provisional)
-def simular_llegada_a_casillero(con, pedido_id, ahora=None):
-    """ATAJO del paso 2: lleva el pedido ASIGNADO -> EN_TRANSPORTE -> VERIFICANDO como si la
-    banda ya hubiera entregado la caja. En el paso 3 lo reemplaza la máquina de estados."""
+# ------------------------------------------------------------------ banda transportadora
+def _atender_alertas(con, ahora, tipo, pedido_id):
+    con.execute("UPDATE alertas SET atendida = 1, atendida_en = ? WHERE tipo = ?"
+                " AND atendida = 0 AND pedido_id = ?", (fmt(ahora), tipo, pedido_id))
+
+
+def _guardar_eventos(con, ahora, prefijo, eventos, pedido_id, casillero_id):
+    """Pasa los eventos de una máquina de estados a la bitácora, cada uno con su segundo."""
+    for ev in eventos:
+        _bitacora(con, ahora + timedelta(seconds=ev.t), f"{prefijo}_{ev.tipo}",
+                  f"t={ev.t:g}s {ev.detalle}", pedido_id, casillero_id)
+
+
+def pedido_atascado(con):
+    """Mientras un pedido esté ATASCADO la banda permanece detenida."""
+    fila = con.execute("SELECT id FROM pedidos WHERE estado = 'ATASCADO' LIMIT 1").fetchone()
+    return fila["id"] if fila else None
+
+
+def despachar_pedido(con, pedido_id, atasco_en=None, ahora=None):
+    """Corre la máquina de estados de la banda para llevar la caja al casillero asignado.
+
+    Acepta pedidos ASIGNADO (primer intento) o ATASCADO (reintento tras despejar la banda).
+    Éxito  -> EN_TRANSPORTE -> VERIFICANDO (sigue la validación de peso y foto).
+    Atasco -> EN_TRANSPORTE -> ATASCADO, motores apagados y alerta ATASCO al administrador.
+    """
     ahora = ahora or ahora_utc()
     with transaccion(con):
-        _cambiar_estado(con, ahora, pedido_id, "EN_TRANSPORTE", "(simulado) banda en marcha.")
-        _cambiar_estado(con, ahora, pedido_id, "VERIFICANDO", "(simulado) caja en el casillero.")
-    return obtener_pedido(con, pedido_id)
+        pedido = _pedido_fila(con, pedido_id)
+        if pedido["estado"] not in ("ASIGNADO", "ATASCADO"):
+            raise EstadoInvalido(f"El pedido {pedido_id} está {pedido['estado']}; solo se "
+                                 "despachan pedidos ASIGNADO o ATASCADO (reintento).")
+        otro = pedido_atascado(con)
+        if otro is not None and otro != pedido_id:
+            raise EstadoInvalido(f"La banda está detenida por un atasco del pedido {otro}. "
+                                 "Reinténtelo o cancélelo primero.")
+        reintento = pedido["estado"] == "ATASCADO"
+        cas_id = pedido["casillero_id"]
+        codigo = con.execute("SELECT codigo FROM casilleros WHERE id = ?", (cas_id,)).fetchone()[0]
+        timeout = float(_config(con, "timeout_atasco_s"))
+        try:
+            rec = maquina.simular_recorrido(codigo, timeout, atasco_en)
+        except ValueError as e:
+            raise SolicitudInvalida(str(e))
+
+        _cambiar_estado(con, ahora, pedido_id, "EN_TRANSPORTE",
+                        "Reintento tras atasco." if reintento else "Banda en marcha.")
+        _guardar_eventos(con, ahora, "BANDA", rec.eventos, pedido_id, cas_id)
+        fin = ahora + timedelta(seconds=rec.duracion_s)
+        if rec.exito:
+            _cambiar_estado(con, fin, pedido_id, "VERIFICANDO",
+                            f"Caja en el casillero {codigo} ({rec.duracion_s:g} s).")
+            if reintento:
+                _atender_alertas(con, fin, "ATASCO", pedido_id)
+        else:
+            _cambiar_estado(con, fin, pedido_id, "ATASCADO",
+                            f"{rec.sensor_fallido} sin detección tras {timeout:g} s.")
+            _alerta(con, fin, "ATASCO",
+                    f"Pedido {pedido_id}: la caja no llegó a {rec.sensor_fallido} tras {timeout:g} s "
+                    f"(rumbo al casillero {codigo}). Motores detenidos. Despeje la banda y pulse "
+                    "Reintentar, o cancele el pedido.", pedido_id, cas_id)
+    return {
+        "pedido": obtener_pedido(con, pedido_id),
+        "exito": rec.exito,
+        "estado_banda": rec.estado_final.value,
+        "sensor_fallido": rec.sensor_fallido,
+        "duracion_s": rec.duracion_s,
+        "eventos": [{"t": e.t, "tipo": e.tipo, "detalle": e.detalle} for e in rec.eventos],
+    }
+
+
+def estado_maquina(con, limite=25):
+    """Estado actual de la banda y últimas señales (para la pantalla del administrador)."""
+    atascado = pedido_atascado(con)
+    senales = [dict(f) for f in con.execute(
+        "SELECT pedido_id, tipo, detalle, creado_en FROM bitacora"
+        " WHERE tipo LIKE 'BANDA_%' OR tipo LIKE 'CERRADURA_%' ORDER BY id DESC LIMIT ?",
+        (limite,))]
+    return {"banda": "DETENIDA_ATASCO" if atascado else "REPOSO",
+            "pedido_atascado": atascado, "senales": senales}
 
 
 # ------------------------------------------------------------------ PIN
@@ -383,6 +463,8 @@ def abrir_casillero(con, codigo, pin, ahora=None):
         con.execute("UPDATE pins SET estado = 'USADO' WHERE id = ?", (fila["id"],))
         _bitacora(con, ahora, "CERRADURA_ABIERTA", f"Casillero {codigo} desbloqueado.",
                   fila["pedido_id"], cas["id"])
+        _guardar_eventos(con, ahora, "CERRADURA", maquina.ciclo_cerradura(codigo),
+                         fila["pedido_id"], cas["id"])
         _cambiar_estado(con, ahora, fila["pedido_id"], "ENTREGADO", "Retirado por el cliente.")
         _liberar_stock(con, fila["pedido_id"], devolver=False)
         _set_casillero(con, ahora, cas["id"], "LIBRE")
@@ -549,6 +631,9 @@ def reemitir_pin(con, pedido_id, ahora=None):
             " ORDER BY id DESC LIMIT 1", (pedido_id,)).fetchone()
         if pedido["estado"] != "LISTO_RETIRO" or bloqueado is None:
             raise EstadoInvalido(f"El pedido {pedido_id} no tiene un PIN bloqueado.")
+        # El PIN bloqueado queda reemplazado. Si siguiera como BLOQUEADO, un segundo clic
+        # intentaría emitir otro PIN (error 500) y el barrido de 24 h caducaría dos veces.
+        con.execute("UPDATE pins SET estado = 'CADUCADO' WHERE id = ?", (bloqueado["id"],))
         pin, expira = _emitir_pin(con, ahora, pedido_id, pedido["casillero_id"],
                                   expira_en=bloqueado["expira_en"])
         codigo = con.execute("SELECT codigo FROM casilleros WHERE id = ?",
@@ -557,6 +642,10 @@ def reemitir_pin(con, pedido_id, ahora=None):
         _notificar(con, ahora, pedido_id,
                    f"Se emitió un nuevo PIN para el casillero {codigo}. PIN: {pin}. "
                    f"Vigente hasta {expira} (UTC).")
+        # La alerta queda resuelta: así el administrador ve que su acción tuvo efecto
+        # y el botón «Reemitir PIN» no queda disponible para un segundo clic.
+        con.execute("UPDATE alertas SET atendida = 1, atendida_en = ? WHERE tipo = 'PIN_BLOQUEADO'"
+                    " AND atendida = 0 AND pedido_id = ?", (fmt(ahora), pedido_id))
     return obtener_pedido(con, pedido_id)
 
 
