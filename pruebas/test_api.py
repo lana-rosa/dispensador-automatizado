@@ -11,8 +11,10 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import api  # noqa: E402
+import cuentas  # noqa: E402
 import db  # noqa: E402
 
+cuentas.ITERACIONES = 1_000  # solo en pruebas: hashes más rápidos (en producción 200 000)
 T0 = datetime(2026, 10, 8, 12, 0, 0, tzinfo=timezone.utc)
 
 
@@ -32,9 +34,31 @@ class BaseApi(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.ruta = Path(self._dir.name) / "test.db"
         self.reloj = RelojFalso()
-        self.cli = TestClient(api.crear_app(self.ruta, reloj=self.reloj))
+        self.app = api.crear_app(self.ruta, reloj=self.reloj)
+        # Issue 1: todas las rutas piden sesión. Se crean un cliente y un administrador de prueba
+        # y cada petición lleva el token que corresponde según la ruta.
+        con = db.conectar(self.ruta)
+        cuentas.crear_usuario(con, "admin@x.co", "admin", "clave-admin-123", "ADMIN")
+        # Las pruebas de caducidad adelantan el reloj 24 h; la sesión de prueba dura un año.
+        con.execute("UPDATE configuracion SET valor = '8760' WHERE clave = 'horas_sesion'")
+        con.close()
+        self.anon = TestClient(self.app)  # sin sesión
+        self.token_cliente = self.anon.post("/cuentas/registro", json={
+            "correo": "ana@x.co", "usuario": "ana", "contrasena": "clave-ana-123"}).json()["token"]
+        self.token_admin = self.anon.post("/cuentas/login", json={
+            "usuario": "admin", "contrasena": "clave-admin-123"}).json()["token"]
+        self.cli = TestClient(self.app)
+        self.cli.event_hooks["request"].append(self._poner_token)
+
+    def _poner_token(self, request):
+        ruta = request.url.path
+        es_admin = ruta.startswith("/admin/") or ruta.startswith("/maquina/")
+        if "authorization" not in request.headers:
+            request.headers["Authorization"] = "Bearer " + (
+                self.token_admin if es_admin else self.token_cliente)
 
     def tearDown(self):
+        self.anon.close()
         self.cli.close()
         self._dir.cleanup()
 
@@ -47,7 +71,7 @@ class BaseApi(unittest.TestCase):
         return r.json()
 
     def llevar_y_verificar(self, pedido_id, peso):
-        self.assertEqual(self.cli.post(f"/maquina/pedidos/{pedido_id}/llegada").status_code, 200)
+        self.assertEqual(self.cli.post(f"/maquina/pedidos/{pedido_id}/despachar").status_code, 200)
         r = self.cli.post(f"/maquina/pedidos/{pedido_id}/verificacion",
                           json={"peso_medido_g": peso, "foto_ruta": f"fotos/p{pedido_id}.jpg"})
         self.assertEqual(r.status_code, 200, r.text)
@@ -126,6 +150,36 @@ class PruebasFlujo(BaseApi):
         self.assertIn("PIN_BLOQUEADO", [a["tipo"] for a in self.cli.get("/admin/alertas").json()])
         self.assertEqual(self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin").status_code, 200)
         self.assertEqual(self.cli.post(url, json={"pin": self.pin_de(pedido["id"])}).status_code, 200)
+
+    def test_reemitir_pin_atiende_la_alerta_y_no_se_repite(self):
+        # Issue 3: al reemitir, la alerta de PIN bloqueado debe desaparecer de pendientes.
+        pedido = self.pedir()
+        self.llevar_y_verificar(pedido["id"], 25.0)
+        pin = self.pin_de(pedido["id"])
+        malo = "000000" if pin != "000000" else "111111"
+        for _ in range(3):
+            self.cli.post(f"/casilleros/{pedido['casillero']}/abrir", json={"pin": malo})
+        self.assertIsNone(self.cli.get(f"/pedidos/{pedido['id']}").json()["pin_expira_en"])
+        r = self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin")
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNotNone(r.json()["pin_expira_en"])
+        self.assertNotIn("PIN_BLOQUEADO", [a["tipo"] for a in self.cli.get("/admin/alertas").json()])
+        nuevo = self.pin_de(pedido["id"])
+        self.assertNotEqual(nuevo, pin)
+        # Un segundo clic ya no tiene PIN bloqueado que reemitir.
+        self.assertEqual(self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin").status_code, 409)
+
+    def test_pedido_con_pin_reemitido_caduca_una_sola_vez(self):
+        # Issue 3: el PIN viejo bloqueado no debe romper el barrido de caducidad.
+        pedido = self.pedir()
+        self.llevar_y_verificar(pedido["id"], 25.0)
+        for _ in range(3):
+            self.cli.post(f"/casilleros/{pedido['casillero']}/abrir", json={"pin": "999999"})
+        self.cli.post(f"/admin/pedidos/{pedido['id']}/reemitir-pin")
+        self.reloj.avanzar(hours=24, seconds=1)
+        r = self.cli.post("/admin/caducar-vencidos")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["pedidos_caducados"], [pedido["id"]])
 
     def test_P3_casilleros_llenos_entra_en_cola_y_se_despacha_al_liberarse(self):
         primeros = [self.pedir() for _ in range(6)]  # hay 6 casilleros
@@ -227,7 +281,7 @@ class PruebasReglas(BaseApi):
 
     def test_no_se_cancela_cuando_ya_va_en_la_banda(self):
         pedido = self.pedir()
-        self.cli.post(f"/maquina/pedidos/{pedido['id']}/llegada")
+        self.cli.post(f"/maquina/pedidos/{pedido['id']}/despachar")
         self.assertEqual(self.cli.post(f"/pedidos/{pedido['id']}/cancelar").status_code, 409)
 
     def test_no_se_verifica_un_pedido_que_no_esta_en_el_casillero(self):
@@ -238,7 +292,7 @@ class PruebasReglas(BaseApi):
 
     def test_foto_debe_ser_jpg(self):
         pedido = self.pedir()
-        self.cli.post(f"/maquina/pedidos/{pedido['id']}/llegada")
+        self.cli.post(f"/maquina/pedidos/{pedido['id']}/despachar")
         r = self.cli.post(f"/maquina/pedidos/{pedido['id']}/verificacion",
                           json={"peso_medido_g": 25, "foto_ruta": "foto.png"})
         self.assertEqual(r.status_code, 422)
