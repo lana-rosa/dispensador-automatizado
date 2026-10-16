@@ -15,7 +15,32 @@ INSERT INTO configuracion (clave, valor, descripcion) VALUES
     ('max_intentos_pin',      '3',   'Intentos fallidos antes de bloquear el PIN'),
     ('tolerancia_peso_pct',   '2.0', 'Tolerancia de peso en % del peso teórico'),
     ('tolerancia_peso_min_g', '2.0', 'Tolerancia mínima en gramos (para piezas muy livianas)'),
-    ('timeout_atasco_s',      '10',  'Segundos sin avance del sensor antes de declarar atasco');
+    ('timeout_atasco_s',      '10',  'Segundos sin avance del sensor antes de declarar atasco'),
+    ('horas_sesion',          '12',  'Horas que dura una sesión iniciada antes de pedir la contraseña otra vez');
+
+-- ---------------------------------------------------------------- cuentas (Issue 1)
+-- CLIENTE: se registra solo desde la pantalla del cliente.
+-- ADMIN:   lo crea quien instala el sistema con `python crear_admin.py` (no hay registro público).
+-- La contraseña nunca se guarda: solo su hash PBKDF2 con sal aleatoria.
+CREATE TABLE usuarios (
+    id            INTEGER PRIMARY KEY,
+    correo        TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    usuario       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT    NOT NULL,
+    salt          TEXT    NOT NULL,
+    rol           TEXT    NOT NULL CHECK (rol IN ('CLIENTE', 'ADMIN')),
+    activo        INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1)),
+    creado_en     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+-- Sesión iniciada. Se guarda el hash del token, no el token: quien lea la BD no puede
+-- hacerse pasar por nadie.
+CREATE TABLE sesiones (
+    token_hash TEXT    PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios (id),
+    creado_en  TEXT    NOT NULL,
+    expira_en  TEXT    NOT NULL
+);
 
 -- ---------------------------------------------------------------- inventario
 -- stock_disponible: unidades que se pueden ofrecer a nuevos pedidos.
@@ -65,6 +90,7 @@ CREATE TABLE casilleros (
 -- CADUCADO        pasaron 24 h sin retiro
 CREATE TABLE pedidos (
     id               INTEGER PRIMARY KEY,
+    usuario_id       INTEGER REFERENCES usuarios (id),  -- cuenta del cliente que pidió
     cliente_nombre   TEXT    NOT NULL,
     cliente_contacto TEXT    NOT NULL,
     peso_teorico_g   REAL    NOT NULL CHECK (peso_teorico_g > 0),
@@ -89,6 +115,7 @@ CREATE UNIQUE INDEX ux_pedido_activo_por_casillero
 
 -- Para sacar rápido el siguiente pedido de la cola (FIFO).
 CREATE INDEX ix_pedidos_cola ON pedidos (estado, id);
+CREATE INDEX ix_pedidos_usuario ON pedidos (usuario_id, id);
 
 -- Líneas del carrito. peso_unitario_g es una copia (snapshot) del peso del producto
 -- al momento de pedir: si luego cambia el catálogo, el peso teórico no se altera.
