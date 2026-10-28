@@ -87,7 +87,15 @@ python3 -m unittest discover -s pruebas -v
 |---|---|
 | `schema.sql` | Tablas, restricciones e índices (SQLite) |
 | `db.py` | Conexión y datos de demostración |
-| `servicio.py` | Todas las reglas de negocio |
+| `servicio/` | Todas las reglas de negocio, divididas por responsabilidad (ver abajo) |
+| `servicio/nucleo.py` | Errores de negocio, transiciones de estado, transacciones |
+| `servicio/pedidos.py` | Crear el carrito, pagar (descuenta stock), consultar y cancelar |
+| `servicio/inventario.py` | Stock disponible y reservado, reabastecimiento |
+| `servicio/casilleros.py` | Asignación, cola FIFO, mantenimiento y ocupación |
+| `servicio/banda.py` | Despacho por la banda simulada, atascos, estado de la máquina |
+| `servicio/retiro.py` | PIN, apertura del casillero, caducidad a las 24 h, reemisión del PIN |
+| `servicio/verificacion.py` | Peso medido y foto simulada, falla de la báscula |
+| `servicio/alertas.py` | Alertas del administrador |
 | `cuentas.py` | Cuentas, contraseñas (PBKDF2) y sesiones |
 | `crear_admin.py` | Crea cuentas de administrador desde la terminal |
 | `maquina.py` | Máquinas de estados de la banda (sensores, motor, actuador) y de las electrocerraduras |

@@ -1,4 +1,4 @@
-"""API REST del dispensador (FastAPI). No tiene reglas de negocio: llama a servicio.py.
+"""API REST del dispensador (FastAPI). No tiene reglas de negocio: llama al paquete servicio/.
 
 Perfiles (sin autenticación en este MVP; se separan por ruta y por etiqueta en /docs):
   * Cliente        -> /productos, /pedidos...

@@ -7,7 +7,7 @@ Componentes simulados
   * Electrocerradura de cada casillero ...... salida  ELECTROCERRADURA_<cod>=ON/OFF
   * Sensor de puerta de cada casillero ...... entrada PUERTA_<cod>=ABIERTA/CERRADA
 
-Este módulo NO toca la base de datos: solo calcula la secuencia de eventos. servicio.py la
+Este módulo NO toca la base de datos: solo calcula la secuencia de eventos. el paquete servicio/ la
 guarda en la bitácora y actualiza el pedido. Así la lógica de control se puede probar sola.
 
 Tiempo simulado: no se esperan segundos reales; cada evento lleva el segundo «t» en que
