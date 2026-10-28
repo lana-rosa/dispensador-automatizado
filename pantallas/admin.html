@@ -203,7 +203,7 @@ function pintarCasilleros(cas) {
 
 function pintarPedidos(pedidos) {
   $("pedidos").innerHTML = pedidos.map((p) => `
-    <tr><td>${p.id}</td><td>${esc(p.cliente_nombre)}</td><td>${resumenItems(p.items)}</td>
+    <tr><td>${p.id}</td><td>${esc(p.cliente_nombre)}</td><td>${resumenItems(p.items, !!p.pagado_en)}</td>
       <td>${chipEstado(p.estado)}${p.posicion_en_cola ? ` <span class="ayuda">#${p.posicion_en_cola}</span>` : ""}</td>
       <td>${esc(p.casillero || "—")}</td>
       <td><button class="btn chico sec" data-traza="${p.id}">Historial</button></td></tr>`).join("")

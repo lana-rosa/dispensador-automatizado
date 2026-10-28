@@ -63,10 +63,19 @@ class BaseApi(unittest.TestCase):
         self._dir.cleanup()
 
     # ---- ayudas
-    def pedir(self, items=None, esperado=201):
+    def pedir(self, items=None, esperado=201, pagar=True):
+        """Crea el pedido (queda PENDIENTE_PAGO) y, salvo que pagar=False, lo paga (simulado);
+        devuelve el pedido ya pagado: con casillero o en cola, como antes de RF-05."""
         items = items or [{"sku": "ARD-UNO", "cantidad": 1}]
         r = self.cli.post("/pedidos", json={"cliente_nombre": "Ana", "cliente_contacto": "ana@x.co",
                                             "items": items})
+        self.assertEqual(r.status_code, esperado, r.text)
+        if esperado != 201 or not pagar:
+            return r.json()
+        return self.pagar(r.json()["id"])
+
+    def pagar(self, pedido_id, esperado=200, resultado="APROBADO"):
+        r = self.cli.post(f"/pedidos/{pedido_id}/pagar", json={"resultado": resultado})
         self.assertEqual(r.status_code, esperado, r.text)
         return r.json()
 
@@ -262,11 +271,12 @@ class PruebasFlujo(BaseApi):
 
 
 class PruebasReglas(BaseApi):
-    def test_sin_stock_rechaza_todo_el_carrito(self):
-        r = self.pedir([{"sku": "ARD-UNO", "cantidad": 1}, {"sku": "CAUTIN-30", "cantidad": 99}],
-                       esperado=409)
-        self.assertEqual(r["error"], "SIN_STOCK")
-        self.assertEqual(self.stock("ARD-UNO")["stock_reservado"], 0)  # no quedó nada a medias
+    def test_sin_stock_ya_no_rechaza_todo_el_carrito(self):
+        # RF-05: al pagar, el pedido sigue con lo disponible en vez de rechazarse completo.
+        p = self.pedir([{"sku": "ARD-UNO", "cantidad": 1}, {"sku": "CAUTIN-30", "cantidad": 99}])
+        self.assertEqual(p["estado"], "ASIGNADO")
+        self.assertEqual([f["sku"] for f in p["faltantes"]], ["CAUTIN-30"])
+        self.assertEqual(self.stock("ARD-UNO")["stock_reservado"], 1)
 
     def test_producto_inexistente(self):
         self.assertEqual(self.pedir([{"sku": "NOPE", "cantidad": 1}], esperado=404)["error"],

@@ -255,9 +255,7 @@ document.getElementById("form-pedido").addEventListener("submit", async (e) => {
   if (r.ok) {
     const p = r.datos;
     Object.keys(carrito).forEach((k) => delete carrito[k]);
-    msj.innerHTML = p.estado === "EN_COLA"
-      ? `<p class="aviso info">Pedido #${p.id} aceptado. Todos los casilleros están ocupados: quedó en cola (posición ${p.posicion_en_cola}).</p>`
-      : `<p class="aviso ok">¡Pedido #${p.id} creado! Casillero reservado: <b>${esc(p.casillero)}</b>.</p>`;
+    msj.innerHTML = `<p class="aviso info">Pedido #${p.id} creado. Págalo (pago simulado) para descontar los productos del inventario y reservar tu casillero.</p>`;
     await cargarProductos();
     await cargarMisPedidos();
   } else {
@@ -294,7 +292,8 @@ function tarjetaPedido(p, notis) {
   const extra = p.estado === "EN_COLA" ? ` · posición ${p.posicion_en_cola} en la cola` : "";
   return `<div class="pedido">
     <div class="cab"><b>Pedido #${p.id}</b>${chipEstado(p.estado)}</div>
-    <div class="detalle">${resumenItems(p.items)}</div>
+    <div class="detalle">${resumenItems(p.items, !!p.pagado_en)}</div>
+    ${p.faltantes && p.faltantes.length ? `<p class="aviso info">Al pagar no había suficiente de: ${p.faltantes.map((f) => `${esc(f.nombre)} (pediste ${f.pedidas}, enviamos ${f.confirmadas})`).join("; ")}. Tu pedido sigue con lo disponible.</p>` : ""}
     <div class="detalle">${esc(explicacion)}${extra}${p.casillero ? ` · Casillero <b>${esc(p.casillero)}</b>` : ""}</div>
     ${bloqueado ? `<p class="aviso error">🔒 Tu PIN se bloqueó por 3 intentos fallidos. El administrador te enviará uno nuevo por aquí.</p>` : ""}
     ${listo ? `<div class="pin-caja">
@@ -303,7 +302,8 @@ function tarjetaPedido(p, notis) {
     ${ultimo && p.estado !== "LISTO_RETIRO" && !/PIN: /.test(ultimo) ? `<div class="detalle">📩 ${esc(ultimo)}</div>` : ""}
     <div class="acciones">
       ${listo ? `<button class="btn chico" data-usar="${esc(p.casillero)}" data-pin="${esc(pin)}">Ir a retirar</button>` : ""}
-      ${["EN_COLA", "ASIGNADO"].includes(p.estado) ? `<button class="btn chico peligro" data-cancelar="${p.id}">Cancelar pedido</button>` : ""}
+      ${p.estado === "PENDIENTE_PAGO" ? `<button class="btn chico" data-pagar="${p.id}">Pagar (simulado)</button>` : ""}
+      ${["PENDIENTE_PAGO", "EN_COLA", "ASIGNADO"].includes(p.estado) ? `<button class="btn chico peligro" data-cancelar="${p.id}">Cancelar pedido</button>` : ""}
     </div>
   </div>`;
 }
@@ -311,6 +311,15 @@ function tarjetaPedido(p, notis) {
 document.getElementById("mis-pedidos").addEventListener("click", async (e) => {
   const usar = e.target.closest("[data-usar]");
   const cancelar = e.target.closest("[data-cancelar]");
+  const pagar = e.target.closest("[data-pagar]");
+  if (pagar) {
+    pagar.disabled = true;
+    const r = await api(`/pedidos/${pagar.dataset.pagar}/pagar`, { method: "POST", body: {} });
+    if (!r.ok) alert(textoError(r));
+    await cargarProductos();
+    await cargarMisPedidos();
+    return;
+  }
   if (usar) {
     document.getElementById("casillero").value = usar.dataset.usar;
     pinDigitado = "";  // el cliente debe digitarlo, como en el casillero real

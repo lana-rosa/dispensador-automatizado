@@ -41,7 +41,12 @@ pulsa «+24 h» en el reloj simulado.
 En `/docs` cada endpoint tiene el botón **Try it out**. Flujo sugerido:
 
 1. `GET /productos` — ver qué hay.
-2. `POST /pedidos` — crear un carrito, ej. `{"cliente_nombre":"Ana","cliente_contacto":"ana@x.co","items":[{"sku":"ARD-UNO","cantidad":2}]}`.
+2. `POST /pedidos` — crear un carrito, ej. `{"items":[{"sku":"ARD-UNO","cantidad":2}]}`. Queda `PENDIENTE_PAGO`:
+   todavía no descuenta inventario ni reserva casillero.
+2b. `POST /pedidos/{id}/pagar` — pago **simulado** (RF-05). Descuenta el inventario en ese momento y asigna casillero
+   o pone el pedido en cola. Si de algún producto quedan menos unidades de las pedidas, el pedido **sigue con lo
+   disponible** (la respuesta trae `faltantes`) y el peso teórico se recalcula; si no hay unidades de ninguno, responde
+   409 `SIN_STOCK` y no cobra. Con `{"resultado": "RECHAZADO"}` se simula un pago que falla (402).
 3. `POST /maquina/pedidos/{id}/despachar` — la máquina de estados lleva la caja por la banda hasta el casillero.
    Con `{"atasco_en": "S_DESVIO"}` se simula un atasco (P4); el mismo endpoint sirve para reintentar.
 4. `POST /maquina/pedidos/{id}/verificacion` — `{"peso_medido_g": 50, "foto_ruta": "fotos/p1.jpg"}`.
@@ -58,6 +63,13 @@ Para probar P5 en vivo sin esperar 24 h, usa la demo (A) o las pruebas: el reloj
 ```bash
 python3 -m unittest discover -s pruebas -v
 ```
+
+### Pago simulado y descuento de stock (RF-05)
+
+- Estados nuevos: `PENDIENTE_PAGO` → (pagar) → `ASIGNADO` o `EN_COLA`. Cancelar un pedido sin pagar no toca el inventario.
+- `pedido_items` guarda `cantidad_pedida` (lo que pidió el cliente) y `cantidad` (lo confirmado al pagar).
+- La alerta de stock bajo ahora se genera al pagar.
+- Cambió el esquema: apaga el programa y corre `python db.py` para recrear la base.
 
 ### Datos de entrada y falla de la báscula (Issue #4)
 

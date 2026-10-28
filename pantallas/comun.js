@@ -64,6 +64,7 @@ function fecha(iso) {
 }
 
 const ESTADOS = {
+  PENDIENTE_PAGO: ["Pendiente de pago", "ambar", "Paga para descontar los productos del inventario y reservar tu casillero"],
   EN_COLA: ["En cola", "ambar", "Esperando un casillero libre"],
   ASIGNADO: ["Casillero reservado", "azul", "Preparando tu pedido"],
   EN_TRANSPORTE: ["En camino", "azul", "La banda lo lleva al casillero"],
@@ -81,6 +82,11 @@ function chipEstado(estado) {
   return `<span class="chip ${color}">${esc(texto)}</span>`;
 }
 
-function resumenItems(items) {
-  return items.map((i) => `${i.cantidad} × ${esc(i.nombre)}`).join(", ");
+function resumenItems(items, pagado = true) {
+  // Antes de pagar se muestra lo pedido; después, lo confirmado («2 de 5» si faltó stock).
+  return items.map((i) => {
+    const pedida = i.cantidad_pedida ?? i.cantidad;
+    if (!pagado) return `${pedida} × ${esc(i.nombre)}`;
+    return i.cantidad < pedida ? `${i.cantidad} de ${pedida} × ${esc(i.nombre)}` : `${i.cantidad} × ${esc(i.nombre)}`;
+  }).join(", ");
 }

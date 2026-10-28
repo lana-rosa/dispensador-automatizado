@@ -67,14 +67,14 @@ class PruebasEsquema(unittest.TestCase):
     def test_claves_foraneas_activas(self):
         pedido = self._pedido()
         with self.assertRaises(sqlite3.IntegrityError):
-            self.con.execute("INSERT INTO pedido_items VALUES (?, 999, 1, 25)", (pedido,))
+            self.con.execute("INSERT INTO pedido_items VALUES (?, 999, 1, 25, 1)", (pedido,))
 
     def test_un_pedido_admite_varios_productos_pero_sin_repetir_linea(self):
         pedido = self._pedido()
-        self.con.execute("INSERT INTO pedido_items VALUES (?, 1, 1, 25)", (pedido,))
-        self.con.execute("INSERT INTO pedido_items VALUES (?, 2, 3, 90)", (pedido,))
+        self.con.execute("INSERT INTO pedido_items VALUES (?, 1, 1, 25, 1)", (pedido,))
+        self.con.execute("INSERT INTO pedido_items VALUES (?, 2, 3, 90, 3)", (pedido,))
         with self.assertRaises(sqlite3.IntegrityError):
-            self.con.execute("INSERT INTO pedido_items VALUES (?, 1, 1, 25)", (pedido,))
+            self.con.execute("INSERT INTO pedido_items VALUES (?, 1, 1, 25, 1)", (pedido,))
 
     def test_tipo_de_alerta_invalido(self):
         with self.assertRaises(sqlite3.IntegrityError):

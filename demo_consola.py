@@ -42,8 +42,9 @@ def titulo(texto):
 
 
 def pedir(items):
-    return cli.post("/pedidos", json={"cliente_nombre": "Ana", "cliente_contacto": "ana@correo.co",
-                                      "items": items}).json()
+    """Crea el carrito (PENDIENTE_PAGO) y lo paga (simulado): ahí se descuenta el inventario."""
+    creado = cli.post("/pedidos", json={"items": items}).json()
+    return cli.post(f"/pedidos/{creado['id']}/pagar", json={}).json()
 
 
 def pin_de(pid):

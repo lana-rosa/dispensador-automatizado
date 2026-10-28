@@ -79,7 +79,8 @@ CREATE TABLE casilleros (
 -- verifican con un solo peso: la suma de cantidad x peso unitario de sus líneas
 -- (tabla pedido_items).
 --
--- EN_COLA         aceptado, sin casillero libre todavía
+-- PENDIENTE_PAGO el cliente armó el carrito; aún no paga. NO descuenta inventario (RF-05)
+-- EN_COLA         pagado, sin casillero libre todavía
 -- ASIGNADO        casillero reservado, esperando arrancar la banda
 -- EN_TRANSPORTE   banda/actuador moviendo la caja
 -- VERIFICANDO     en el casillero, validando peso y foto
@@ -95,8 +96,9 @@ CREATE TABLE pedidos (
     cliente_nombre   TEXT    NOT NULL,
     cliente_contacto TEXT    NOT NULL,
     peso_teorico_g   REAL    NOT NULL CHECK (peso_teorico_g > 0),
-    estado           TEXT    NOT NULL DEFAULT 'EN_COLA'
-                     CHECK (estado IN ('EN_COLA', 'ASIGNADO', 'EN_TRANSPORTE', 'VERIFICANDO',
+    pagado_en        TEXT,                              -- NULL = aún no se ha descontado stock
+    estado           TEXT    NOT NULL DEFAULT 'PENDIENTE_PAGO'
+                     CHECK (estado IN ('PENDIENTE_PAGO', 'EN_COLA', 'ASIGNADO', 'EN_TRANSPORTE', 'VERIFICANDO',
                                        'LISTO_RETIRO', 'ENTREGADO', 'RECHAZADO', 'ATASCADO',
                                        'CANCELADO', 'CADUCADO')),
     casillero_id     INTEGER REFERENCES casilleros (id),
@@ -120,11 +122,14 @@ CREATE INDEX ix_pedidos_usuario ON pedidos (usuario_id, id);
 
 -- Líneas del carrito. peso_unitario_g es una copia (snapshot) del peso del producto
 -- al momento de pedir: si luego cambia el catálogo, el peso teórico no se altera.
+-- cantidad_pedida: lo que el cliente pidió. cantidad: lo que se confirmó al pagar (RF-05):
+-- si al pagar quedaban menos unidades, el pedido sigue con lo disponible (puede quedar en 0).
 CREATE TABLE pedido_items (
     pedido_id       INTEGER NOT NULL REFERENCES pedidos (id),
     producto_id     INTEGER NOT NULL REFERENCES productos (id),
-    cantidad        INTEGER NOT NULL CHECK (cantidad > 0),
+    cantidad        INTEGER NOT NULL CHECK (cantidad >= 0),
     peso_unitario_g REAL    NOT NULL CHECK (peso_unitario_g > 0),
+    cantidad_pedida INTEGER NOT NULL CHECK (cantidad_pedida > 0),
     PRIMARY KEY (pedido_id, producto_id)
 );
 

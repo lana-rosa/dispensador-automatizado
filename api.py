@@ -41,6 +41,11 @@ class LoginIn(BaseModel):
     contrasena: str = Field(max_length=128, examples=["una-clave-segura"])
 
 
+class PagoIn(BaseModel):
+    # Pago simulado: «RECHAZADO» sirve para probar un pago que falla.
+    resultado: Literal["APROBADO", "RECHAZADO"] = Field(default="APROBADO", examples=["APROBADO"])
+
+
 class VerificacionIn(BaseModel):
     # El peso lo valida el servicio, no el modelo: si la báscula no responde (None) o manda un
     # dato imposible (negativo, NaN, enorme) hay que ALERTAR al administrador, y un 422 de
@@ -160,7 +165,7 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
         return servicio.inventario(con)
 
     @app.post("/pedidos", status_code=201, tags=["Cliente"],
-              summary="Crear pedido (carrito). Se asigna casillero o entra en cola")
+              summary="Crear pedido (carrito). Queda pendiente de pago: aún no descuenta inventario")
     def crear_pedido(datos: PedidoIn, usuario=Depends(usuario_actual), con=Depends(conexion),
                      ahora=Depends(ahora)):
         if usuario["rol"] != "CLIENTE":
@@ -187,8 +192,17 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     def trazabilidad(pedido_id: int = Depends(ver_pedido_propio), con=Depends(conexion)):
         return servicio.listar_bitacora(con, pedido_id)
 
+    @app.post("/pedidos/{pedido_id}/pagar", tags=["Cliente"],
+              summary="Pagar el pedido (SIMULADO): descuenta el inventario y reserva casillero. "
+                      "Si falta stock de algún producto, sigue con lo disponible")
+    def pagar(datos: PagoIn | None = None, pedido_id: int = Depends(ver_pedido_propio),
+              con=Depends(conexion), ahora=Depends(ahora)):
+        resultado = servicio.pagar_pedido(
+            con, pedido_id, aprobado=(datos is None or datos.resultado == "APROBADO"), ahora=ahora)
+        return JSONResponse(resultado, 200 if resultado["pago_aprobado"] else 402)
+
     @app.post("/pedidos/{pedido_id}/cancelar", tags=["Cliente"],
-              summary="Cancelar (solo antes de que la banda mueva la caja)")
+              summary="Cancelar (solo antes de que la banda mueva la caja; si ya pagó, devuelve el stock)")
     def cancelar(pedido_id: int = Depends(ver_pedido_propio), con=Depends(conexion),
                  ahora=Depends(ahora)):
         return servicio.cancelar_pedido(con, pedido_id, ahora)
