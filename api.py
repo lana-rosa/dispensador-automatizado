@@ -297,6 +297,12 @@ def crear_app(ruta_bd=db.RUTA_BD, reloj=None) -> FastAPI:
     def admin_cancelar(pedido_id: int, con=Depends(conexion), ahora=Depends(ahora)):
         return servicio.cancelar_pedido(con, pedido_id, ahora, por_admin=True)
 
+    @app.post("/admin/pedidos/{pedido_id}/resolver-despacho", tags=["Administrador"],
+              summary="Marcar el error de despacho como solucionado y continuar: el pedido vuelve "
+                      "a VERIFICANDO para pesar de nuevo")
+    def resolver_despacho(pedido_id: int, con=Depends(conexion), ahora=Depends(ahora)):
+        return servicio.resolver_error_despacho(con, pedido_id, ahora)
+
     @app.post("/admin/pedidos/{pedido_id}/reemitir-pin", tags=["Administrador"],
               summary="Nuevo PIN cuando el anterior quedó bloqueado")
     def reemitir(pedido_id: int, con=Depends(conexion), ahora=Depends(ahora)):

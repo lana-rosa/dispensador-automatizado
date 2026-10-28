@@ -17,7 +17,7 @@ TRANSICIONES = {
     "LISTO_RETIRO": {"ENTREGADO", "CADUCADO"},
     "ATASCADO": {"EN_TRANSPORTE", "CANCELADO"},
     "ENTREGADO": set(),
-    "RECHAZADO": set(),
+    "RECHAZADO": {"VERIFICANDO"},  # el administrador resolvió el error de despacho
     "CANCELADO": set(),
     "CADUCADO": set(),
 }

@@ -6,7 +6,9 @@ from .nucleo import (
     EstadoInvalido, SolicitudInvalida, ahora_utc, fmt, transaccion, _config, _bitacora,
     _alerta, _notificar, _pedido_fila, _set_casillero, _cambiar_estado,
 )
-from .inventario import _liberar_stock
+from .alertas import _atender_alertas
+from .inventario import _liberar_stock, _reservar_de_nuevo
+from .pedidos import obtener_pedido
 from .retiro import _emitir_pin
 
 
@@ -85,3 +87,35 @@ def registrar_verificacion(con, pedido_id, peso_medido_g, foto_ruta, ahora=None)
         estado = _pedido_fila(con, pedido_id)["estado"]
     return {"aprobado": aprobado, "peso_teorico_g": teorico, "peso_medido_g": peso_medido_g,
             "tolerancia_g": tolerancia, "estado_pedido": estado}
+
+
+def resolver_error_despacho(con, pedido_id, ahora=None):
+    """El administrador revisó la caja, corrigió el problema (faltaba o sobraba un producto, la
+    báscula estaba mal calibrada...) y quiere CONTINUAR. El pedido NO salta directo al PIN: vuelve
+    a VERIFICANDO para pesar de nuevo, así la regla del peso sigue siendo la que decide.
+    Devuelve el casillero de MANTENIMIENTO a RESERVADO, vuelve a reservar el stock que se había
+    devuelto y deja atendida la alerta."""
+    ahora = ahora or ahora_utc()
+    with transaccion(con):
+        pedido = _pedido_fila(con, pedido_id)
+        if pedido["estado"] != "RECHAZADO":
+            raise EstadoInvalido(
+                f"El pedido {pedido_id} está {pedido['estado']}; solo se continúa un pedido "
+                "con error de despacho (RECHAZADO).")
+        cas = con.execute("SELECT * FROM casilleros WHERE id = ?",
+                          (pedido["casillero_id"],)).fetchone()
+        if cas["estado"] != "MANTENIMIENTO":
+            raise EstadoInvalido(
+                f"El casillero {cas['codigo']} ya no está en mantenimiento ({cas['estado']}); "
+                "no se puede continuar este pedido.")
+        _reservar_de_nuevo(con, pedido_id)
+        _cambiar_estado(con, ahora, pedido_id, "VERIFICANDO",
+                        "Problema solucionado por el administrador; falta volver a pesar.")
+        _set_casillero(con, ahora, cas["id"], "RESERVADO")
+        _atender_alertas(con, ahora, "ERROR_DESPACHO", pedido_id)
+        _bitacora(con, ahora, "ERROR_DESPACHO_RESUELTO",
+                  "El administrador marcó el problema como solucionado.", pedido_id, cas["id"])
+        _notificar(con, ahora, pedido_id,
+                   f"Resolvimos el problema con tu pedido #{pedido_id}. Lo estamos verificando "
+                   "de nuevo y te avisamos en cuanto esté listo.")
+    return obtener_pedido(con, pedido_id)

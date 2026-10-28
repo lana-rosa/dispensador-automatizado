@@ -51,6 +51,10 @@ En `/docs` cada endpoint tiene el botón **Try it out**. Flujo sugerido:
    Con `{"atasco_en": "S_DESVIO"}` se simula un atasco (P4); el mismo endpoint sirve para reintentar.
 4. `POST /maquina/pedidos/{id}/verificacion` — `{"peso_medido_g": 50, "foto_ruta": "fotos/p1.jpg"}`.
    Si el peso coincide se genera el PIN; si no, queda RECHAZADO y se crea la alerta.
+   Con RECHAZADO el administrador revisa la caja y, desde la alerta «Falla de despacho», pulsa
+   **Problema solucionado: continuar** (`POST /admin/pedidos/{id}/resolver-despacho`): el casillero vuelve a RESERVADO,
+   se vuelve a reservar el stock y el pedido regresa a VERIFICANDO para pesar otra vez; el peso sigue decidiendo si hay PIN.
+   Si el casillero ya se liberó o el stock se agotó, responde 409.
 5. `GET /pedidos/{id}/notificaciones` — aquí «llega» el PIN al cliente.
 6. `POST /casilleros/{codigo}/abrir` — `{"pin": "123456"}`.
 7. `GET /admin/casilleros`, `/admin/inventario`, `/admin/alertas` — vista del administrador.

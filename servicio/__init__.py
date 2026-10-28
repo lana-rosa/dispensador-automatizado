@@ -48,5 +48,5 @@ from .retiro import (
     abrir_casillero, caducar_vencidos, reemitir_pin,
 )  # noqa: F401
 from .verificacion import (
-    registrar_verificacion,
+    registrar_verificacion, resolver_error_despacho,
 )  # noqa: F401

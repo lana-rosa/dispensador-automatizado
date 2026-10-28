@@ -1,6 +1,6 @@
 """Inventario: stock disponible y reservado, y reabastecimiento."""
 
-from .nucleo import NoEncontrado, SolicitudInvalida, ahora_utc, fmt, transaccion, _bitacora
+from .nucleo import NoEncontrado, SinStock, SolicitudInvalida, ahora_utc, fmt, transaccion, _bitacora
 
 
 def _liberar_stock(con, pedido_id, devolver: bool):
@@ -13,6 +13,25 @@ def _liberar_stock(con, pedido_id, devolver: bool):
             " stock_disponible = stock_disponible + ? WHERE id = ?",
             (it["cantidad"], it["cantidad"] if devolver else 0, it["producto_id"]),
         )
+
+
+def _reservar_de_nuevo(con, pedido_id):
+    """Disponible -> reservado otra vez, para un pedido cuyo stock se devolvió al rechazarlo.
+    Si ya no alcanza (otro pedido se llevó las unidades) lanza SinStock sin cambiar nada."""
+    faltan = []
+    items = con.execute(
+        "SELECT i.producto_id, i.cantidad, pr.sku, pr.stock_disponible FROM pedido_items i"
+        " JOIN productos pr ON pr.id = i.producto_id WHERE i.pedido_id = ?", (pedido_id,)).fetchall()
+    for it in items:
+        if it["stock_disponible"] < it["cantidad"]:
+            faltan.append(f"{it['sku']} (necesita {it['cantidad']}, hay {it['stock_disponible']})")
+    if faltan:
+        raise SinStock("No hay unidades para continuar el pedido: " + "; ".join(faltan)
+                       + ". Reabastece el inventario o cancela el pedido.")
+    for it in items:
+        con.execute("UPDATE productos SET stock_disponible = stock_disponible - ?,"
+                    " stock_reservado = stock_reservado + ? WHERE id = ?",
+                    (it["cantidad"], it["cantidad"], it["producto_id"]))
 
 
 def inventario(con):

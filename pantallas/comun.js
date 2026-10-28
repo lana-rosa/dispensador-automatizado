@@ -71,7 +71,7 @@ const ESTADOS = {
   VERIFICANDO: ["Verificando", "lila", "Revisando peso y foto"],
   LISTO_RETIRO: ["Listo para retirar", "verde", "Usa tu PIN en el casillero"],
   ENTREGADO: ["Entregado", "", "Pedido retirado"],
-  RECHAZADO: ["Error de despacho", "rojo", "El peso no coincidió; un asesor te contactará"],
+  RECHAZADO: ["Error de despacho", "rojo", "El peso no coincidió; un asesor revisará tu pedido y lo continuará"],
   ATASCADO: ["Detenido", "rojo", "Atasco en la banda"],
   CANCELADO: ["Cancelado", "", "Cancelado por el cliente"],
   CADUCADO: ["Caducado", "", "No se retiró dentro de las 24 h"],
