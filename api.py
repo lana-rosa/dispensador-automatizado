@@ -21,13 +21,13 @@ import servicio
 
 
 class ItemIn(BaseModel):
-    sku: str = Field(examples=["ARD-UNO"])
-    cantidad: int = Field(gt=0, examples=[2])
+    sku: str = Field(min_length=1, max_length=40, examples=["ARD-UNO"])
+    cantidad: int = Field(gt=0, le=100, examples=[2])
 
 
 class PedidoIn(BaseModel):
     # El nombre y el contacto salen de la cuenta con la que el cliente inició sesión.
-    items: list[ItemIn] = Field(min_length=1)
+    items: list[ItemIn] = Field(min_length=1, max_length=30)
 
 
 class RegistroIn(BaseModel):
@@ -42,7 +42,10 @@ class LoginIn(BaseModel):
 
 
 class VerificacionIn(BaseModel):
-    peso_medido_g: float = Field(ge=0, examples=[110.0])
+    # El peso lo valida el servicio, no el modelo: si la báscula no responde (None) o manda un
+    # dato imposible (negativo, NaN, enorme) hay que ALERTAR al administrador, y un 422 de
+    # Pydantic habría rechazado la petición sin dejar rastro.
+    peso_medido_g: float | None = Field(default=None, examples=[110.0])
     foto_ruta: str = Field(pattern=r"(?i)^.+\.jpe?g$", examples=["fotos/pedido1.jpg"])
 
 
@@ -57,7 +60,7 @@ class DespacharIn(BaseModel):
 
 
 class ReabastecerIn(BaseModel):
-    cantidad: int = Field(gt=0, examples=[10])
+    cantidad: int = Field(gt=0, le=100_000, examples=[10])
 
 
 class AdelantarIn(BaseModel):

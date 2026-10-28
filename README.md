@@ -59,6 +59,16 @@ Para probar P5 en vivo sin esperar 24 h, usa la demo (A) o las pruebas: el reloj
 python3 -m unittest discover -s pruebas -v
 ```
 
+### Datos de entrada y falla de la báscula (Issue #4)
+
+- Los modelos de `api.py` limitan cada dato: `sku` de 1 a 40 caracteres, `cantidad` de 1 a 100, de 1 a 30
+  líneas por carrito y reabastecimientos de hasta 100 000 unidades. Lo que no cumple da **422**.
+- El peso de la báscula lo valida el servicio. Si no llega (`null`), es negativo, `NaN` o supera
+  `peso_max_bascula_g` (tabla `configuracion`, 50 000 g), se responde **422**, se crea la alerta
+  **BASCULA** para el administrador (una sola por pedido) y el pedido sigue en `VERIFICANDO` para reintentar.
+  Un peso válido pero distinto al teórico NO es falla de báscula: sigue siendo el Error de Despacho (P6).
+- Cambió el esquema (tipo de alerta y un parámetro): apaga el programa y corre `python db.py` para recrear la base.
+
 ## Estructura
 
 | Archivo | Qué hace |

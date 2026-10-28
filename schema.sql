@@ -16,7 +16,8 @@ INSERT INTO configuracion (clave, valor, descripcion) VALUES
     ('tolerancia_peso_pct',   '2.0', 'Tolerancia de peso en % del peso teórico'),
     ('tolerancia_peso_min_g', '2.0', 'Tolerancia mínima en gramos (para piezas muy livianas)'),
     ('timeout_atasco_s',      '10',  'Segundos sin avance del sensor antes de declarar atasco'),
-    ('horas_sesion',          '12',  'Horas que dura una sesión iniciada antes de pedir la contraseña otra vez');
+    ('horas_sesion',          '12',  'Horas que dura una sesión iniciada antes de pedir la contraseña otra vez'),
+    ('peso_max_bascula_g',    '50000', 'Peso máximo creíble de la celda de carga (g); más que esto se toma como falla de la báscula');
 
 -- ---------------------------------------------------------------- cuentas (Issue 1)
 -- CLIENTE: se registra solo desde la pantalla del cliente.
@@ -163,7 +164,7 @@ CREATE TABLE verificaciones (
 CREATE TABLE alertas (
     id           INTEGER PRIMARY KEY,
     tipo         TEXT    NOT NULL
-                 CHECK (tipo IN ('ATASCO', 'ERROR_DESPACHO', 'STOCK_BAJO', 'PIN_BLOQUEADO')),
+                 CHECK (tipo IN ('ATASCO', 'ERROR_DESPACHO', 'STOCK_BAJO', 'PIN_BLOQUEADO', 'BASCULA')),
     pedido_id    INTEGER REFERENCES pedidos (id),
     casillero_id INTEGER REFERENCES casilleros (id),
     producto_id  INTEGER REFERENCES productos (id),

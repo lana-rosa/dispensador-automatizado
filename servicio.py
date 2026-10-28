@@ -12,6 +12,7 @@ Convenciones:
 """
 import hashlib
 import hmac
+import math
 import secrets
 import sqlite3
 from contextlib import contextmanager
@@ -499,10 +500,40 @@ def caducar_vencidos(con, ahora=None):
 
 
 # ------------------------------------------------------------------ peso + foto
+def _validar_lectura_bascula(con, pedido_id, peso_medido_g, ahora):
+    """Una lectura imposible (sin dato, negativa, NaN o por encima del máximo de la celda de
+    carga) es una FALLA DE LA BÁSCULA, no un peso distinto al esperado: se avisa al
+    administrador y se rechaza con 422 SIN cambiar el pedido (sigue en VERIFICANDO y se puede
+    reintentar). La alerta se guarda en su propia transacción antes de lanzar el error, porque
+    una excepción dentro de la transacción deshace todo."""
+    maximo = float(_config(con, "peso_max_bascula_g"))
+    if peso_medido_g is None:
+        motivo = "la báscula no envió ningún peso"
+    elif not math.isfinite(peso_medido_g):
+        motivo = f"la báscula envió un valor inválido ({peso_medido_g})"
+    elif peso_medido_g < 0:
+        motivo = f"la báscula envió un peso negativo ({peso_medido_g:g} g)"
+    elif peso_medido_g > maximo:
+        motivo = f"la báscula envió {peso_medido_g:g} g, por encima del máximo de {maximo:g} g"
+    else:
+        return
+    with transaccion(con):
+        pedido = _pedido_fila(con, pedido_id)
+        ya = con.execute("SELECT 1 FROM alertas WHERE tipo = 'BASCULA' AND atendida = 0"
+                         " AND pedido_id = ?", (pedido_id,)).fetchone()
+        if not ya:
+            _alerta(con, ahora, "BASCULA",
+                    f"Pedido {pedido_id}: {motivo}. Revisar la celda de carga.",
+                    pedido_id, pedido["casillero_id"])
+        _bitacora(con, ahora, "BASCULA_FALLA", motivo, pedido_id, pedido["casillero_id"])
+    raise SolicitudInvalida(f"Lectura de báscula inválida: {motivo}. Se avisó al administrador.")
+
+
 def registrar_verificacion(con, pedido_id, peso_medido_g, foto_ruta, ahora=None):
     """Valida el peso medido contra el teórico y guarda la foto simulada.
     Aprobado -> genera PIN y notifica. Rechazado -> sin PIN, alerta al administrador."""
     ahora = ahora or ahora_utc()
+    _validar_lectura_bascula(con, pedido_id, peso_medido_g, ahora)
     with transaccion(con):
         pedido = _pedido_fila(con, pedido_id)
         if pedido["estado"] != "VERIFICANDO":
